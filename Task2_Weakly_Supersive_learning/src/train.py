@@ -532,7 +532,7 @@ def validate_aff(model, data_loader, criterion, device):
 
 def generate_cams(model, data_loader, save_dir, device):
     """
-    生成CAM
+    生成CAM并保存到指定目录
     
     Args:
         model: 模型
@@ -561,9 +561,14 @@ def generate_cams(model, data_loader, save_dir, device):
                 cam_path = os.path.join(save_dir, f'{image_id}.npy')
                 np.save(cam_path, cams[i])
 
-def main():
-    """主函数"""
-    args = parse_args()
+def main(args=None):
+    """主函数
+    
+    Args:
+        args: 命令行参数对象。如果为None，则使用parse_args解析
+    """
+    if args is None:
+        args = parse_args()
     
     # 设置随机种子
     torch.manual_seed(args.seed)

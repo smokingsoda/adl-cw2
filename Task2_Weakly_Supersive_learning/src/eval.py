@@ -237,9 +237,14 @@ def evaluate(args):
     plt.savefig(os.path.join(args.output_dir, 'metrics.png'))
     plt.close()
 
-def main():
-    """主函数"""
-    args = parse_args()
+def main(args=None):
+    """主函数
+    
+    Args:
+        args: 命令行参数对象。如果为None，则使用parse_args解析
+    """
+    if args is None:
+        args = parse_args()
     evaluate(args)
 
 if __name__ == '__main__':
