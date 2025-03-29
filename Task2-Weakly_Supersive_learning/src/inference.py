@@ -7,11 +7,19 @@ from tqdm import tqdm
 import cv2
 from PIL import Image
 import matplotlib.pyplot as plt
+import sys
 
-from models.affinitynet import AffinityNet, propagate_labels
-from utils.datasets import PetDataset
-from utils.transforms import get_transforms
-from utils.misc import apply_crf, visualize_cam, visualize_affinity
+# 获取项目根目录路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+task_dir = os.path.dirname(current_dir)
+
+# 添加Task2-Weakly_Supersive_learning目录到Python搜索路径
+sys.path.append(os.path.dirname(current_dir))
+
+# 导入模块
+from models import AffinityNet, propagate_labels
+from utils import PetDataset, get_transforms
+from utils import apply_crf, visualize_cam, visualize_affinity
 
 def parse_args():
     """解析命令行参数"""

@@ -21,7 +21,7 @@ pip install torch==2.5.0 torchvision --index-url https://download.pytorch.org/wh
    - 杨佳晟
    - 陈威龙
 
-2. **弱监督组**（边框、弱监督）
+2. **弱监督组**（图像标签 ——> 像素标签、弱监督）
    - 李朝晖
    - 王路悦
    - 陈昕远
