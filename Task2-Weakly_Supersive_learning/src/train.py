@@ -42,7 +42,7 @@ def parse_args():
                         help='学习率')
     parser.add_argument('--weight_decay', type=float, default=0.0005,
                         help='权重衰减')
-    parser.add_argument('--epochs', type=int, default=50,
+    parser.add_argument('--epochs', type=int, default=10,
                         help='训练轮次')
     parser.add_argument('--stage', type=int, default=1,
                         help='训练阶段: 1-分类阶段, 2-亲和力阶段')

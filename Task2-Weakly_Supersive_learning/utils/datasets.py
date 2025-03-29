@@ -275,36 +275,38 @@ class AffinityPetDataset(Dataset):
     
     def _generate_affinity_mask(self, image_id, image):
         """
-        生成亲和力掩码
+        生成亲和力掩码 - 固定尺寸为56x56，匹配模型输出
         
         Args:
             image_id: 图像ID
             image: 图像数据
         
         Returns:
-            亲和力掩码
+            亲和力掩码 [8, 56, 56]
         """
+        # 固定输出分辨率为56x56
+        target_size = (56, 56)
+        
         # 加载CAM
         cam = self._load_cam(image_id)  # [C, H, W]
         labels = self._load_labels(image_id)  # [C]
         
-        # 将CAM调整为与图像相同的大小
-        h, w = image.shape[1:3]
-        cam_resized = np.zeros((self.num_classes, h, w), dtype=np.float32)
+        # 将CAM直接调整为目标尺寸(56x56)
+        cam_resized = np.zeros((self.num_classes, *target_size), dtype=np.float32)
         
         # 只处理存在的类别
         for c in range(self.num_classes):
             if labels[c] > 0 and c < cam.shape[0]:  # 确保CAM中有这个类别
-                # 调整CAM大小
+                # 调整CAM大小为固定尺寸
                 cls_cam = Image.fromarray(cam[c])
-                cls_cam = cls_cam.resize((w, h), Image.BILINEAR)
+                cls_cam = cls_cam.resize(target_size, Image.BILINEAR)
                 cam_resized[c] = np.array(cls_cam)
         
         # 阈值处理CAM
         cam_thresholded = (cam_resized > self.threshold).astype(np.float32)
         
         # 生成亲和力掩码（8个方向）
-        affinity_mask = np.zeros((8, h, w), dtype=np.float32)
+        affinity_mask = np.zeros((8, *target_size), dtype=np.float32)
         
         # 8个方向的偏移量
         offsets = [
@@ -312,6 +314,9 @@ class AffinityPetDataset(Dataset):
             (0, -1),           (0, 1),
             (1, -1),  (1, 0),  (1, 1)
         ]
+        
+        # 目标尺寸的高度和宽度
+        h, w = target_size
         
         # 生成亲和力标签
         for d, (dy, dx) in enumerate(offsets):

@@ -2,11 +2,11 @@ import os
 import sys
 import argparse
 import multiprocessing
+import importlib.util
 
 # 添加项目根目录到Python模块搜索路径
 project_root = os.path.dirname(os.path.abspath(__file__))
 task_dir = os.path.join(project_root, "Task2-Weakly_Supersive_learning")
-sys.path.append(task_dir)
 
 # 创建命令行参数解析器
 parser = argparse.ArgumentParser(description='AffinityNet评估')
@@ -22,9 +22,14 @@ if __name__ == '__main__':
     # 添加多进程支持
     multiprocessing.freeze_support()
     
-    # 解析命令行参数并导入eval.py中的main函数
+    # 解析命令行参数
     args = parser.parse_args()
     
-    # 导入并执行eval.py中的main函数
-    from src.eval import main
-    main() 
+    # 使用importlib动态导入eval.py模块
+    eval_path = os.path.join(task_dir, 'src', 'eval.py')
+    spec = importlib.util.spec_from_file_location("eval_module", eval_path)
+    eval_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(eval_module)
+    
+    # 执行eval.py中的main函数
+    eval_module.main() 
