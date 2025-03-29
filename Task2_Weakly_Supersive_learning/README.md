@@ -44,7 +44,6 @@ Task2_Weakly_Supersive_learning/
 │   ├── run_inference.py   # 推理启动脚本
 │   └── run_eval.py        # 评估启动脚本  
 │
-├── requirements.txt       # 依赖项
 └── README.md              # 项目说明
 ```
 
