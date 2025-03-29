@@ -1,4 +1,4 @@
-# 像素级语义亲和力学习复现 (Learning Pixel-level Semantic Affinity)
+# 像素级语义亲和力学习 (Learning Pixel-level Semantic Affinity)
 
 本项目受论文《Learning Pixel-level Semantic Affinity with Image-level Supervision》的启发，使用Oxford-IIIT宠物数据集实现弱监督语义分割。
 
