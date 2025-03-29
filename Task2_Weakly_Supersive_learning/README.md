@@ -64,7 +64,7 @@ Task2_Weakly_Supersive_learning/
 
 | 参数 | 类型 | 默认值 | 描述 | 论文代码对应 |
 |------|------|--------|------|----------|
-| `--batch_size` | int | 8 | 批处理大小 | 论文代码实现中亲和力阶段 (train_aff.py) 使用 8。(论文未明确指定) |
+| `--batch_size` | int | 8 | 批处理大小 | 论文代码实现中亲和力阶段 (train_aff.py) 使用 8|
 | `--lr` | float | 0.001 | 学习率 | 论文代码实现中亲和力阶段基础学习率为 0.1，并使用 PolyOptimizer 进行复杂调度(不同层组 1x, 2x, 10x, 20x)。在本实现中第二阶段(亲和力阶段)，骨干网络使用的学习率是 args.lr * 0.1 |
 | `--weight_decay` | float | 0.0005 | 权重衰减(L2正则化) | 论文代码实现中亲和力阶段(train_aff.py)使用 0.0005 (--wt_dec)，与本实现一致 |
 | `--epochs` | int | 10 | 训练轮次 | 论文代码实现中亲和力阶段(train_aff.py)训练 8 个 epoch (--max_epoches)。本实现默认为 10 个 epoch |
@@ -74,7 +74,7 @@ Task2_Weakly_Supersive_learning/
 
 | 参数 | 类型 | 默认值 | 描述 | 论文代码对应 |
 |------|------|--------|------|----------|
-| `--backbone` | str | 'resnet50' | 骨干网络 | 论文使用 ResNet38。代码实现支持 ResNet38 (network.resnet38_aff) 和 VGG16 (network.vgg16_aff) 作为亲和力网络主干。分类网络代码也基于 ResNet38 |
+| `--backbone` | str | 'resnet50' | 骨干网络 | 论文使用 ResNet38。本项目采用ResNet50 |
 | `--num_classes` | int | 37 | 类别数量 | - |
 | `--lambda_aff` | float | 0.1 | 亲和力损失权重 | 在 AffinityLoss 类中实现，当 lambda_aff > 0 且提供了 affinity_mask 时计算亲和力损失。论文原代码实现中亲和力损失各部分(bg, fg, neg)的平衡通过 loss = bg_loss/4 + fg_loss/4 + neg_loss/2 硬编码实现 |
 
@@ -120,9 +120,6 @@ conda activate pixel-aff
 # 创建并激活conda环境
 conda env create -f environment.yaml
 conda activate pixel-aff
-
-# 或者使用pip安装依赖
-# pip install -r requirements.txt
 
 # 创建必要的目录
 mkdir -p data/oxford-iiit-pet data/cams output
