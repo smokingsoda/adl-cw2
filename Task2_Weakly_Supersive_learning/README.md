@@ -108,17 +108,13 @@ conda env create -f environment.yaml
 conda activate pixel-aff
 ```
 
-或者，也可以使用pip安装依赖：
+## 实验与使用方法
 
-```bash
-pip install -r requirements.txt
-```
+本节介绍了如何使用项目代码进行弱监督语义分割的训练、推理与评估实验。
 
-## 使用方法
+### 准备工作
 
-以下提供了完整的命令行指令，您可以直接复制粘贴到终端中运行：
-
-### 环境准备
+在开始实验之前，请完成以下准备工作：
 
 ```bash
 # 创建并激活conda环境
@@ -134,6 +130,8 @@ mkdir -p data/oxford-iiit-pet data/cams output
 
 ### 数据集准备
 
+下载并解压Oxford-IIIT宠物数据集：
+
 ```bash
 # 下载数据集（如果尚未下载）
 # 从 https://academictorrents.com/details/b18bbd9ba03d50b0f7f479acc9f4228a408cecc1 下载
@@ -143,11 +141,9 @@ tar -xzf images.tar.gz -C data/oxford-iiit-pet
 tar -xzf annotations.tar.gz -C data/oxford-iiit-pet
 ```
 
-### 训练
+### 阶段 1: 训练分类网络并生成 CAM
 
-训练分为两个阶段，以下是完整的训练命令：
-
-1. 第一阶段：训练分类器生成CAM
+此阶段训练一个基于图像级标签的分类器，并生成后续阶段所需的类激活图 (CAM)。
 
 ```bash
 # 创建输出目录
@@ -166,7 +162,13 @@ python Task2_Weakly_Supersive_learning/run/run_train.py \
     --gpu_id 0
 ```
 
-2. 第二阶段：训练亲和力模型
+**预期输出:**
+- 训练好的分类模型权重: `./output/stage1_resnet50/model_best.pth.tar`
+- 类激活图(CAM): 存储在`./data/cams`目录下
+
+### 阶段 2: 训练 AffinityNet
+
+此阶段利用阶段1生成的CAM（处理为伪亲和力标签）来训练AffinityNet。
 
 ```bash
 # 创建第二阶段输出目录
@@ -187,7 +189,10 @@ python Task2_Weakly_Supersive_learning/run/run_train.py \
     --gpu_id 0
 ```
 
-### 推理
+**预期输出:**
+- 训练好的AffinityNet模型权重: `./output/stage2_resnet50/model_best.pth.tar`
+
+### 阶段 3: 模型推理
 
 使用训练好的亲和力模型进行推理：
 
@@ -207,26 +212,26 @@ python Task2_Weakly_Supersive_learning/run/run_inference.py \
     --gpu_id 0
 ```
 
-### 评估
+### 阶段 4: 模型评估
 
 评估模型性能：
 
 ```bash
 # 创建评估输出目录
-mkdir -p output/eval
+mkdir -p output/eval_with_crf output/eval_no_crf
 
-# 运行评估（带CRF）
+# 运行评估（带CRF后处理）
 python Task2_Weakly_Supersive_learning/run/run_eval.py \
     --data_root ./data/oxford-iiit-pet \
     --model_path ./output/stage2_resnet50/model_best.pth.tar \
-    --output_dir ./output/eval \
+    --output_dir ./output/eval_with_crf \
     --backbone resnet50 \
     --split test \
     --num_iters 10 \
     --crf \
     --gpu_id 0
 
-# 运行评估（不带CRF）
+# 运行评估（不带CRF后处理）
 python Task2_Weakly_Supersive_learning/run/run_eval.py \
     --data_root ./data/oxford-iiit-pet \
     --model_path ./output/stage2_resnet50/model_best.pth.tar \
@@ -237,145 +242,91 @@ python Task2_Weakly_Supersive_learning/run/run_eval.py \
     --gpu_id 0
 ```
 
-### 完整训练和评估流程（一键式命令）
+**预期输出:**
+- 评估结果文件（`results.npy`）包含Mean Precision, Recall, F1, IoU等数值
+- 评估指标可视化（`metrics.png`）
+- 每张测试图像的分割结果可视化（`*_eval.png`）
 
-以下是完整的训练和评估流程的一键式命令：
+### 阶段 5: 消融实验
+
+为了深入理解框架各组件和超参数的影响，可以进行以下消融研究：
+
+#### 5.1 亲和力损失权重实验
+
+验证亲和力学习的重要性：
 
 ```bash
-#!/bin/bash
-
-# 设置参数
-DATA_ROOT="./data/oxford-iiit-pet"
-OUTPUT_DIR="./output"
-CAM_DIR="./data/cams"
-BACKBONE="resnet50"
-GPU_ID=0
-
-# 创建必要的目录
-mkdir -p $DATA_ROOT $CAM_DIR $OUTPUT_DIR/stage1_$BACKBONE $OUTPUT_DIR/stage2_$BACKBONE $OUTPUT_DIR/inference $OUTPUT_DIR/eval
-
-# 第一阶段：训练分类器并生成CAM
-echo "===== 第一阶段：训练分类器并生成CAM ====="
+# 以不同的lambda_aff值运行训练
 python Task2_Weakly_Supersive_learning/run/run_train.py \
-    --data_root $DATA_ROOT \
-    --stage 1 \
-    --backbone $BACKBONE \
-    --output_dir $OUTPUT_DIR \
-    --cam_dir $CAM_DIR \
-    --batch_size 8 \
-    --lr 0.001 \
-    --epochs 50 \
-    --gpu_id $GPU_ID
-
-# 第二阶段：训练亲和力模型
-echo "===== 第二阶段：训练亲和力模型 ====="
-python Task2_Weakly_Supersive_learning/run/run_train.py \
-    --data_root $DATA_ROOT \
+    --data_root ./data/oxford-iiit-pet \
     --stage 2 \
-    --backbone $BACKBONE \
-    --output_dir $OUTPUT_DIR \
-    --cam_dir $CAM_DIR \
+    --backbone resnet50 \
+    --output_dir ./output \
+    --cam_dir ./data/cams \
     --batch_size 8 \
     --lr 0.001 \
     --epochs 10 \
-    --lambda_aff 0.1 \
-    --model_path $OUTPUT_DIR/stage1_$BACKBONE/model_best.pth.tar \
-    --gpu_id $GPU_ID
-
-# 模型推理
-echo "===== 模型推理 ====="
-python Task2_Weakly_Supersive_learning/run/run_inference.py \
-    --data_root $DATA_ROOT \
-    --model_path $OUTPUT_DIR/stage2_$BACKBONE/model_best.pth.tar \
-    --output_dir $OUTPUT_DIR/inference \
-    --backbone $BACKBONE \
-    --split test \
-    --num_iters 10 \
-    --crf \
-    --gpu_id $GPU_ID
-
-# 模型评估
-echo "===== 模型评估 ====="
-python Task2_Weakly_Supersive_learning/run/run_eval.py \
-    --data_root $DATA_ROOT \
-    --model_path $OUTPUT_DIR/stage2_$BACKBONE/model_best.pth.tar \
-    --output_dir $OUTPUT_DIR/eval \
-    --backbone $BACKBONE \
-    --split test \
-    --num_iters 10 \
-    --crf \
-    --gpu_id $GPU_ID
-
-echo "===== 全部完成 ====="
+    --lambda_aff 0 \  # 尝试不同值：0, 0.01, 0.1, 1.0
+    --model_path ./output/stage1_resnet50/model_best.pth.tar \
+    --gpu_id 0
 ```
 
-如果您使用Windows系统，可以使用以下PowerShell脚本：
+#### 5.2 标签传播迭代次数实验
+
+研究标签传播步骤的效果及迭代次数影响：
+
+```bash
+# 以不同的num_iters值运行评估
+python Task2_Weakly_Supersive_learning/run/run_eval.py \
+    --data_root ./data/oxford-iiit-pet \
+    --model_path ./output/stage2_resnet50/model_best.pth.tar \
+    --output_dir ./output/eval_iters_X \  # X替换为具体的迭代数值
+    --backbone resnet50 \
+    --split test \
+    --num_iters 5 \  # 尝试不同值：0, 5, 10, 20
+    --crf \
+    --gpu_id 0
+```
+
+#### 5.3 CRF后处理实验
+
+量化CRF对分割边界精度的提升效果（已在阶段4中进行）。
+
+#### 5.4 (可选) 骨干网络实验
+
+探究更强大骨干网络的影响：
+
+```bash
+# 使用ResNet101进行训练
+python Task2_Weakly_Supersive_learning/run/run_train.py \
+    --data_root ./data/oxford-iiit-pet \
+    --stage 1 \
+    --backbone resnet101 \
+    --output_dir ./output \
+    --cam_dir ./data/cams \
+    --batch_size 8 \
+    --lr 0.001 \
+    --epochs 50 \
+    --gpu_id 0
+```
+
+### 不同操作系统的运行说明
+
+#### Windows (PowerShell)
+
+在Windows系统中，请将上述bash命令中的反斜杠 `\` 替换为重音符 `` ` ``，例如：
 
 ```powershell
-# 设置参数
-$DATA_ROOT = "./data/oxford-iiit-pet"
-$OUTPUT_DIR = "./output"
-$CAM_DIR = "./data/cams"
-$BACKBONE = "resnet50"
-$GPU_ID = 0
-
-# 创建必要的目录
-mkdir -Force $DATA_ROOT, $CAM_DIR, "$OUTPUT_DIR/stage1_$BACKBONE", "$OUTPUT_DIR/stage2_$BACKBONE", "$OUTPUT_DIR/inference", "$OUTPUT_DIR/eval"
-
-# 第一阶段：训练分类器并生成CAM
-Write-Host "===== 第一阶段：训练分类器并生成CAM ====="
 python Task2_Weakly_Supersive_learning/run/run_train.py `
-    --data_root $DATA_ROOT `
+    --data_root ./data/oxford-iiit-pet `
     --stage 1 `
-    --backbone $BACKBONE `
-    --output_dir $OUTPUT_DIR `
-    --cam_dir $CAM_DIR `
-    --batch_size 8 `
-    --lr 0.001 `
-    --epochs 50 `
-    --gpu_id $GPU_ID
-
-# 第二阶段：训练亲和力模型
-Write-Host "===== 第二阶段：训练亲和力模型 ====="
-python Task2_Weakly_Supersive_learning/run/run_train.py `
-    --data_root $DATA_ROOT `
-    --stage 2 `
-    --backbone $BACKBONE `
-    --output_dir $OUTPUT_DIR `
-    --cam_dir $CAM_DIR `
-    --batch_size 8 `
-    --lr 0.001 `
-    --epochs 10 `
-    --lambda_aff 0.1 `
-    --model_path "$OUTPUT_DIR/stage1_$BACKBONE/model_best.pth.tar" `
-    --gpu_id $GPU_ID
-
-# 模型推理
-Write-Host "===== 模型推理 ====="
-python Task2_Weakly_Supersive_learning/run/run_inference.py `
-    --data_root $DATA_ROOT `
-    --model_path "$OUTPUT_DIR/stage2_$BACKBONE/model_best.pth.tar" `
-    --output_dir "$OUTPUT_DIR/inference" `
-    --backbone $BACKBONE `
-    --split test `
-    --num_iters 10 `
-    --crf `
-    --gpu_id $GPU_ID
-
-# 模型评估
-Write-Host "===== 模型评估 ====="
-python Task2_Weakly_Supersive_learning/run/run_eval.py `
-    --data_root $DATA_ROOT `
-    --model_path "$OUTPUT_DIR/stage2_$BACKBONE/model_best.pth.tar" `
-    --output_dir "$OUTPUT_DIR/eval" `
-    --backbone $BACKBONE `
-    --split test `
-    --num_iters 10 `
-    --crf `
-    --gpu_id $GPU_ID
-
-Write-Host "===== 全部完成 ====="
+    --backbone resnet50 `
+    # ... 其他参数
 ```
+
+#### macOS/Linux
+
+macOS和Linux系统可以直接使用上述bash命令。
 
 ## 实现细节
 1. 使用Oxford-IIIT宠物数据集（37个类别）进行训练和评估
@@ -513,10 +464,6 @@ Write-Host "===== 全部完成 ====="
     *   **实验:** 修改 `utils/datasets.py` 中 `AffinityPetDataset` 的 `self.threshold` 值 (例如 0.2, 0.3, 0.4)，重新运行 Stage 2 训练和 Stage 3 评估。
 
 **记录:** 对所有实验，请系统地记录使用的参数配置和得到的评估结果，以便在报告中进行分析和展示。
-
-### (可选) 阶段 6: 开放性问题探索 (OEQ)
-
-根据项目需求文档 Section 2.3，您可以设计并执行额外的实验来探索开放性问题 (OEQ)。例如，研究不同 CAM 生成方法的影响、结合自监督学习等。请在此处添加您 OEQ 的具体实验计划和步骤。
 
 ## 引用
 
