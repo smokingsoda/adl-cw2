@@ -88,8 +88,8 @@ def visualize_cam(image, cam, threshold=0.3, alpha=0.5):
     image = image.permute(1, 2, 0).cpu().numpy()  # [H, W, 3]
     image = (image - image.min()) / (image.max() - image.min())  # 归一化到 [0, 1]
     
-    # 获取CAM大小
-    h, w = cam.shape[1:]
+    # 获取图像尺寸
+    img_h, img_w = image.shape[:2]
     
     # 创建热图
     cam_sum = cam.sum(0)  # [H, W]
@@ -102,6 +102,10 @@ def visualize_cam(image, cam, threshold=0.3, alpha=0.5):
     cam_sum = cam_sum.cpu().numpy()
     heatmap = cv2.applyColorMap(np.uint8(255 * cam_sum), cv2.COLORMAP_JET)  # [H, W, 3]
     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB) / 255.0
+    
+    # 调整热图尺寸与原始图像匹配
+    if heatmap.shape[:2] != (img_h, img_w):
+        heatmap = cv2.resize(heatmap, (img_w, img_h), interpolation=cv2.INTER_LINEAR)
     
     # 混合
     mixed = (1 - alpha) * image + alpha * heatmap
@@ -123,6 +127,9 @@ def visualize_affinity(image, affinity, direction=0):
     image = image.permute(1, 2, 0).cpu().numpy()  # [H, W, 3]
     image = (image - image.min()) / (image.max() - image.min())  # 归一化到 [0, 1]
     
+    # 获取图像尺寸
+    img_h, img_w = image.shape[:2]
+    
     # 获取指定方向的亲和力
     aff = affinity[direction].cpu().numpy()  # [H, W]
     aff = (aff - aff.min()) / (aff.max() - aff.min() + 1e-8)  # 归一化到 [0, 1]
@@ -130,6 +137,10 @@ def visualize_affinity(image, affinity, direction=0):
     # 转换为热图
     aff_map = cv2.applyColorMap(np.uint8(255 * aff), cv2.COLORMAP_JET)  # [H, W, 3]
     aff_map = cv2.cvtColor(aff_map, cv2.COLOR_BGR2RGB) / 255.0
+    
+    # 调整热图尺寸与原始图像匹配
+    if aff_map.shape[:2] != (img_h, img_w):
+        aff_map = cv2.resize(aff_map, (img_w, img_h), interpolation=cv2.INTER_LINEAR)
     
     # 混合
     mixed = 0.7 * image + 0.3 * aff_map

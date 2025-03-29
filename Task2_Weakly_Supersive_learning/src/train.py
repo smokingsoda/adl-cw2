@@ -25,45 +25,45 @@ from utils import init_weights, save_checkpoint, load_checkpoint, visualize_cam,
 
 def parse_args():
     """解析命令行参数"""
-    parser = argparse.ArgumentParser(description='训练AffinityNet')
+    parser = argparse.ArgumentParser(description='Train AffinityNet')
     
     # 数据集参数
     parser.add_argument('--data_root', type=str, default='./data/oxford-iiit-pet',
-                        help='数据集根目录')
+                        help='Dataset root directory')
     parser.add_argument('--cam_dir', type=str, default='./data/cams',
-                        help='CAM文件目录（用于第二阶段训练）')
+                        help='CAM files directory (for stage 2 training)')
     parser.add_argument('--output_dir', type=str, default='./output',
-                        help='输出目录')
+                        help='Output directory')
     
     # 训练参数
     parser.add_argument('--batch_size', type=int, default=8,
-                        help='批大小')
+                        help='Batch size')
     parser.add_argument('--lr', type=float, default=0.001,
-                        help='学习率')
+                        help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.0005,
-                        help='权重衰减')
+                        help='Weight decay')
     parser.add_argument('--epochs', type=int, default=10,
-                        help='训练轮次')
+                        help='Training epochs')
     parser.add_argument('--stage', type=int, default=1,
-                        help='训练阶段: 1-分类阶段, 2-亲和力阶段')
+                        help='Training stage: 1-classification stage, 2-affinity stage')
     
     # 模型参数
     parser.add_argument('--backbone', type=str, default='resnet50',
-                        help='骨干网络: resnet50, resnet101')
+                        help='Backbone network: resnet50, resnet101')
     parser.add_argument('--num_classes', type=int, default=37,
-                        help='类别数量')
+                        help='Number of classes')
     parser.add_argument('--lambda_aff', type=float, default=0.1,
-                        help='亲和力损失权重')
+                        help='Affinity loss weight')
     
     # 其他参数
     parser.add_argument('--gpu_id', type=int, default=0,
                         help='GPU ID')
     parser.add_argument('--num_workers', type=int, default=4,
-                        help='数据加载线程数')
+                        help='Number of data loading workers')
     parser.add_argument('--seed', type=int, default=42,
-                        help='随机种子')
+                        help='Random seed')
     parser.add_argument('--resume', action='store_true',
-                        help='恢复训练')
+                        help='Resume training')
     
     return parser.parse_args()
 
@@ -77,7 +77,7 @@ def train_stage1(args):
     save_dir = os.path.join(args.output_dir, f'stage1_{args.backbone}')
     os.makedirs(save_dir, exist_ok=True)
     
-    # 设置TensorBoard
+    # A设置TensorBoard
     writer = SummaryWriter(log_dir=os.path.join(save_dir, 'logs'))
     
     # 设置设备
@@ -193,7 +193,7 @@ def train_stage1(args):
         )
     
     # 生成CAM
-    print('生成CAM...')
+    print('Generating CAMs...')
     os.makedirs(args.cam_dir, exist_ok=True)
     generate_cams(model, train_loader, args.cam_dir, device)
     generate_cams(model, val_loader, args.cam_dir, device)
@@ -231,7 +231,7 @@ def train_stage2(args):
     if os.path.exists(stage1_path):
         checkpoint = torch.load(stage1_path)
         model.load_state_dict(checkpoint['state_dict'])
-        print(f'加载第一阶段模型: {stage1_path}')
+        print(f'Loaded stage 1 model: {stage1_path}')
     
     model = model.to(device)
     
@@ -364,7 +364,7 @@ def train_epoch(model, data_loader, optimizer, criterion, device):
     total_loss = 0.0
     total_cls_loss = 0.0
     
-    for batch in tqdm(data_loader, desc='训练'):
+    for batch in tqdm(data_loader, desc='Training'):
         # 获取数据
         images = batch['image'].to(device)
         labels = batch['label'].to(device)
@@ -411,7 +411,7 @@ def train_epoch_aff(model, data_loader, optimizer, criterion, device):
     total_cls_loss = 0.0
     total_aff_loss = 0.0
     
-    for batch in tqdm(data_loader, desc='训练'):
+    for batch in tqdm(data_loader, desc='Training'):
         # 获取数据
         images = batch['image'].to(device)
         labels = batch['label'].to(device)
@@ -461,7 +461,7 @@ def validate(model, data_loader, criterion, device):
     total_cls_loss = 0.0
     
     with torch.no_grad():
-        for batch in tqdm(data_loader, desc='验证'):
+        for batch in tqdm(data_loader, desc='Validating'):
             # 获取数据
             images = batch['image'].to(device)
             labels = batch['label'].to(device)
@@ -503,7 +503,7 @@ def validate_aff(model, data_loader, criterion, device):
     total_aff_loss = 0.0
     
     with torch.no_grad():
-        for batch in tqdm(data_loader, desc='验证'):
+        for batch in tqdm(data_loader, desc='Validating'):
             # 获取数据
             images = batch['image'].to(device)
             labels = batch['label'].to(device)
@@ -545,7 +545,7 @@ def generate_cams(model, data_loader, save_dir, device):
     os.makedirs(save_dir, exist_ok=True)
     
     with torch.no_grad():
-        for batch in tqdm(data_loader, desc='生成CAM'):
+        for batch in tqdm(data_loader, desc='Generating CAMs'):
             # 获取数据
             images = batch['image'].to(device)
             image_ids = batch['image_id']
@@ -580,7 +580,7 @@ def main(args=None):
     elif args.stage == 2:
         train_stage2(args)
     else:
-        raise ValueError(f"无效的训练阶段: {args.stage}")
+        raise ValueError(f"Invalid training stage: {args.stage}")
 
 if __name__ == '__main__':
     main() 

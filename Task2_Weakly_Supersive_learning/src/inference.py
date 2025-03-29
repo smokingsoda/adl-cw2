@@ -23,37 +23,37 @@ from utils import apply_crf, visualize_cam, visualize_affinity
 
 def parse_args():
     """解析命令行参数"""
-    parser = argparse.ArgumentParser(description='AffinityNet推理')
+    parser = argparse.ArgumentParser(description='AffinityNet Inference')
     
     # 数据集参数
     parser.add_argument('--data_root', type=str, default='./data/oxford-iiit-pet',
-                        help='数据集根目录')
+                        help='Dataset root directory')
     parser.add_argument('--output_dir', type=str, default='./output/inference',
-                        help='输出目录')
+                        help='Output directory')
     
     # 模型参数
     parser.add_argument('--model_path', type=str, required=True,
-                        help='模型权重路径')
+                        help='Model weights path')
     parser.add_argument('--backbone', type=str, default='resnet50',
-                        help='骨干网络: resnet50, resnet101')
+                        help='Backbone network: resnet50, resnet101')
     parser.add_argument('--num_classes', type=int, default=37,
-                        help='类别数量')
+                        help='Number of classes')
     
     # 推理参数
     parser.add_argument('--split', type=str, default='test',
-                        help='数据集分割: trainval, test')
+                        help='Dataset split: trainval, test')
     parser.add_argument('--cam_thresh', type=float, default=0.2,
-                        help='CAM阈值')
+                        help='CAM threshold')
     parser.add_argument('--num_iters', type=int, default=10,
-                        help='标签传播迭代次数')
+                        help='Number of iterations for label propagation')
     parser.add_argument('--crf', action='store_true',
-                        help='是否应用CRF后处理')
+                        help='Whether to apply CRF post-processing')
     
     # 其他参数
     parser.add_argument('--gpu_id', type=int, default=0,
                         help='GPU ID')
     parser.add_argument('--batch_size', type=int, default=1,
-                        help='批大小')
+                        help='Batch size')
     
     return parser.parse_args()
 
@@ -94,9 +94,12 @@ def inference(args):
     # 保存类别名称的字典
     class_names = dataset.classes
     
+    # 限制处理的图像数量
+    num_images = min(args.num_images, len(dataset)) if args.num_images > 0 else len(dataset)
+    
     # 进行推理
     with torch.no_grad():
-        for idx in tqdm(range(len(dataset)), desc='推理'):
+        for idx in tqdm(range(num_images), desc='Inferencing', total=num_images):
             # 获取数据
             data = dataset[idx]
             image = data['image'].unsqueeze(0).to(device)
@@ -134,7 +137,7 @@ def inference(args):
             plt.figure(figsize=(15, 10))
             plt.subplot(2, 2, 1)
             plt.imshow(orig_image)
-            plt.title('原始图像')
+            plt.title('Original Image')
             plt.axis('off')
             
             # 2. 可视化CAM
@@ -148,13 +151,13 @@ def inference(args):
             refined_cam_vis = visualize_cam(image[0], refined_cam[0], threshold=args.cam_thresh)
             plt.subplot(2, 2, 3)
             plt.imshow(refined_cam_vis)
-            plt.title('传播后的CAM')
+            plt.title('Refined CAM (after propagation)')
             plt.axis('off')
             
             # 4. 可视化分割结果
             plt.subplot(2, 2, 4)
             plt.imshow(pred, cmap='tab20')
-            plt.title('分割结果')
+            plt.title('Segmentation Result')
             plt.axis('off')
             
             plt.tight_layout()
@@ -167,7 +170,7 @@ def inference(args):
                 plt.subplot(2, 4, d+1)
                 aff_vis = visualize_affinity(image[0], affinity[0], direction=d)
                 plt.imshow(aff_vis)
-                plt.title(f'亲和力 方向 {d}')
+                plt.title(f'Affinity Direction {d}')
                 plt.axis('off')
             
             plt.tight_layout()
@@ -193,7 +196,7 @@ def inference(args):
             
             plt.figure(figsize=(10, 10))
             plt.imshow(overlay)
-            plt.title('分割结果叠加')
+            plt.title('Segmentation Overlay')
             plt.axis('off')
             plt.tight_layout()
             plt.savefig(os.path.join(args.output_dir, f'{image_id}_overlay.png'))

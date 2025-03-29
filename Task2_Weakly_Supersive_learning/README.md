@@ -221,21 +221,21 @@ python Task2_Weakly_Supersive_learning/run/run_eval.py \
     --data_root ./data/oxford-iiit-pet \
     --model_path ./output/stage2_resnet50/model_best.pth.tar \
     --output_dir ./output/eval_with_crf \
-    --backbone resnet50 \
     --split test \
     --num_iters 10 \
     --crf \
-    --gpu_id 0
+    --gpu_id 0 \
+    --num_images 20
 
 # 运行评估（不带CRF后处理）
 python Task2_Weakly_Supersive_learning/run/run_eval.py \
     --data_root ./data/oxford-iiit-pet \
     --model_path ./output/stage2_resnet50/model_best.pth.tar \
     --output_dir ./output/eval_no_crf \
-    --backbone resnet50 \
     --split test \
     --num_iters 10 \
-    --gpu_id 0
+    --gpu_id 0 \
+    --num_images 20
 ```
 
 **预期输出:**
@@ -276,12 +276,12 @@ python Task2_Weakly_Supersive_learning/run/run_train.py \
 python Task2_Weakly_Supersive_learning/run/run_eval.py \
     --data_root ./data/oxford-iiit-pet \
     --model_path ./output/stage2_resnet50/model_best.pth.tar \
-    --output_dir ./output/eval_iters_X \    # X替换为具体的迭代数值
-    --backbone resnet50 \
+    --output_dir ./output/eval_iters_5 \
     --split test \
-    --num_iters 5 \    # 尝试不同值：0, 5, 10, 20
+    --num_iters 5 \
     --crf \
-    --gpu_id 0
+    --gpu_id 0 \
+    --num_images 20
 ```
 
 #### 5.3 CRF后处理实验
@@ -305,24 +305,164 @@ python Task2_Weakly_Supersive_learning/run/run_train.py \
     --epochs 50 \
     --gpu_id 0
 ```
-
-### 不同操作系统的运行说明
+macOS和Linux系统可以直接使用上述bash命令。
 
 #### Windows (PowerShell)
 
-在Windows系统中，请将上述bash命令中的反斜杠 `\` 替换为重音符 `` ` ``，例如：
-
+**环境准备：**
 ```powershell
+# 创建并激活conda环境
+conda env create -f environment.yaml
+conda activate pixel-aff
+
+# 或者使用pip安装依赖
+# pip install -r requirements.txt
+
+# 创建必要的目录
+mkdir -Force data/oxford-iiit-pet data/cams output
+```
+
+**数据集准备：**
+```powershell
+# 解压数据集
+tar -xzf images.tar.gz -C data/oxford-iiit-pet
+tar -xzf annotations.tar.gz -C data/oxford-iiit-pet
+```
+
+**阶段1：训练分类网络并生成CAM**
+```powershell
+# 创建输出目录
+mkdir -Force output/stage1_resnet50
+
+# 运行第一阶段训练
 python Task2_Weakly_Supersive_learning/run/run_train.py `
     --data_root ./data/oxford-iiit-pet `
     --stage 1 `
     --backbone resnet50 `
-    # ... 其他参数
+    --output_dir ./output `
+    --cam_dir ./data/cams `
+    --batch_size 8 `
+    --lr 0.001 `
+    --epochs 50 `
+    --gpu_id 0
 ```
 
-#### macOS/Linux
+**阶段2：训练AffinityNet**
+```powershell
+# 创建第二阶段输出目录
+mkdir -Force output/stage2_resnet50
 
-macOS和Linux系统可以直接使用上述bash命令。
+# 运行第二阶段训练
+python Task2_Weakly_Supersive_learning/run/run_train.py `
+    --data_root ./data/oxford-iiit-pet `
+    --stage 2 `
+    --backbone resnet50 `
+    --output_dir ./output `
+    --cam_dir ./data/cams `
+    --batch_size 8 `
+    --lr 0.001 `
+    --epochs 10 `
+    --lambda_aff 0.1 `
+    --model_path ./output/stage1_resnet50/model_best.pth.tar `
+    --gpu_id 0
+```
+
+**阶段3：模型推理**
+```powershell
+# 创建推理输出目录
+mkdir -Force output/inference
+
+# 运行推理
+python Task2_Weakly_Supersive_learning/run/run_inference.py `
+    --data_root ./data/oxford-iiit-pet `
+    --model_path ./output/stage2_resnet50/model_best.pth.tar `
+    --output_dir ./output/inference `
+    --backbone resnet50 `
+    --split test `
+    --num_iters 10 `
+    --crf `
+    --gpu_id 0 `
+    --num_images 20
+```
+
+**阶段4：模型评估**
+```powershell
+# 创建评估输出目录
+mkdir -Force output/eval_with_crf output/eval_no_crf
+
+# 运行评估（带CRF后处理）
+python Task2_Weakly_Supersive_learning/run/run_eval.py `
+    --data_root ./data/oxford-iiit-pet `
+    --model_path ./output/stage2_resnet50/model_best.pth.tar `
+    --output_dir ./output/eval_with_crf `
+    --split test `
+    --num_iters 10 `
+    --crf `
+    --gpu_id 0 `
+    --num_images 20
+
+# 运行评估（不带CRF后处理）
+python Task2_Weakly_Supersive_learning/run/run_eval.py `
+    --data_root ./data/oxford-iiit-pet `
+    --model_path ./output/stage2_resnet50/model_best.pth.tar `
+    --output_dir ./output/eval_no_crf `
+    --split test `
+    --num_iters 10 `
+    --gpu_id 0 `
+    --num_images 20
+```
+
+**阶段5：消融实验**
+
+**5.1 亲和力损失权重实验**
+```powershell
+# 以不同的lambda_aff值运行训练
+python Task2_Weakly_Supersive_learning/run/run_train.py `
+    --data_root ./data/oxford-iiit-pet `
+    --stage 2 `
+    --backbone resnet50 `
+    --output_dir ./output `
+    --cam_dir ./data/cams `
+    --batch_size 8 `
+    --lr 0.001 `
+    --epochs 10 `
+    --lambda_aff 0 `
+    --model_path ./output/stage1_resnet50/model_best.pth.tar `
+    --gpu_id 0
+
+# 可以尝试其他值：0.01, 0.1, 1.0
+```
+
+**5.2 标签传播迭代次数实验**
+```powershell
+# 以不同的num_iters值运行评估
+python Task2_Weakly_Supersive_learning/run/run_eval.py `
+    --data_root ./data/oxford-iiit-pet `
+    --model_path ./output/stage2_resnet50/model_best.pth.tar `
+    --output_dir ./output/eval_iters_5 `
+    --split test `
+    --num_iters 5 `
+    --crf `
+    --gpu_id 0 `
+    --num_images 20
+
+# 可以尝试其他值：0, 10, 20
+```
+
+**5.4 骨干网络实验**
+```powershell
+# 使用ResNet101进行训练
+python Task2_Weakly_Supersive_learning/run/run_train.py `
+    --data_root ./data/oxford-iiit-pet `
+    --stage 1 `
+    --backbone resnet101 `
+    --output_dir ./output `
+    --cam_dir ./data/cams `
+    --batch_size 8 `
+    --lr 0.001 `
+    --epochs 50 `
+    --gpu_id 0
+```
 
 ## 实现细节
 1. 使用Oxford-IIIT宠物数据集（37个类别）进行训练和评估

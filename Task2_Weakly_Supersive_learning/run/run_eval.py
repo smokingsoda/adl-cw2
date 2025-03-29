@@ -17,6 +17,7 @@ parser.add_argument('--split', type=str, default='test', help='数据集分割')
 parser.add_argument('--num_iters', type=int, default=10, help='标签传播迭代次数')
 parser.add_argument('--crf', action='store_true', help='使用CRF后处理')
 parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID')
+parser.add_argument('--num_images', type=int, default=0, help='要评估的图像数量(0表示全部)')
 
 if __name__ == '__main__':
     # 添加多进程支持

@@ -23,35 +23,37 @@ from utils import PetDataset, get_transforms, apply_crf
 
 def parse_args():
     """解析命令行参数"""
-    parser = argparse.ArgumentParser(description='AffinityNet评估')
+    parser = argparse.ArgumentParser(description='AffinityNet Evaluation')
     
     # 数据集参数
     parser.add_argument('--data_root', type=str, default='./data/oxford-iiit-pet',
-                        help='数据集根目录')
+                        help='Dataset root directory')
     parser.add_argument('--output_dir', type=str, default='./output/eval',
-                        help='输出目录')
+                        help='Output directory')
     
     # 模型参数
     parser.add_argument('--model_path', type=str, required=True,
-                        help='模型权重路径')
+                        help='Model weights path')
     parser.add_argument('--backbone', type=str, default='resnet50',
-                        help='骨干网络: resnet50, resnet101')
+                        help='Backbone network: resnet50, resnet101')
     parser.add_argument('--num_classes', type=int, default=37,
-                        help='类别数量')
+                        help='Number of classes')
     
     # 评估参数
     parser.add_argument('--split', type=str, default='test',
-                        help='数据集分割: trainval, test')
+                        help='Dataset split: trainval, test')
     parser.add_argument('--num_iters', type=int, default=10,
-                        help='标签传播迭代次数')
+                        help='Number of iterations for label propagation')
     parser.add_argument('--crf', action='store_true',
-                        help='是否应用CRF后处理')
+                        help='Whether to apply CRF post-processing')
+    parser.add_argument('--num_images', type=int, default=0,
+                        help='Number of images to evaluate (0 for all images)')
     
     # 其他参数
     parser.add_argument('--gpu_id', type=int, default=0,
                         help='GPU ID')
     parser.add_argument('--batch_size', type=int, default=1,
-                        help='批大小')
+                        help='Batch size')
     
     return parser.parse_args()
 
@@ -68,10 +70,15 @@ def evaluate(args):
     # 设置设备
     device = torch.device(f'cuda:{args.gpu_id}' if torch.cuda.is_available() else 'cpu')
     
+    # 设置默认值，如果参数未定义
+    backbone = getattr(args, 'backbone', 'resnet50')
+    num_classes = getattr(args, 'num_classes', 37)
+    num_images = getattr(args, 'num_images', 0)
+    
     # 创建模型
     model = AffinityNet(
-        backbone=args.backbone,
-        num_classes=args.num_classes,
+        backbone=backbone,
+        num_classes=num_classes,
         pretrained=False
     )
     
@@ -95,9 +102,18 @@ def evaluate(args):
     f1_scores = []
     ious = []
     
+    # 限制评估的图片数量
+    total_images = len(dataset)
+    if num_images > 0:
+        num_images = min(num_images, total_images)
+    else:
+        num_images = total_images
+        
+    print(f"Evaluating {num_images} images from {total_images} total images")
+    
     # 进行评估
     with torch.no_grad():
-        for idx in tqdm(range(len(dataset)), desc='评估'):
+        for idx in tqdm(range(num_images), desc='Evaluating', total=num_images):
             # 获取数据
             data = dataset[idx]
             image = data['image'].unsqueeze(0).to(device)
@@ -113,7 +129,7 @@ def evaluate(args):
             
             # 标签传播
             refined_cam = propagate_labels(
-                affinity, cam, num_iter=args.num_iters, num_classes=args.num_classes
+                affinity, cam, num_iter=args.num_iters, num_classes=num_classes
             )
             
             # 获取原始图像和分割真值
@@ -171,17 +187,17 @@ def evaluate(args):
                 
                 plt.subplot(1, 3, 1)
                 plt.imshow(orig_image)
-                plt.title('原始图像')
+                plt.title('Original Image')
                 plt.axis('off')
                 
                 plt.subplot(1, 3, 2)
                 plt.imshow(gt_mask, cmap='gray')
-                plt.title('真值掩码')
+                plt.title('Ground Truth Mask')
                 plt.axis('off')
                 
                 plt.subplot(1, 3, 3)
                 plt.imshow(pred_mask, cmap='gray')
-                plt.title(f'预测掩码 (IoU: {iou:.4f})')
+                plt.title(f'Predicted Mask (IoU: {iou:.4f})')
                 plt.axis('off')
                 
                 plt.tight_layout()
@@ -189,7 +205,7 @@ def evaluate(args):
                 plt.close()
             
             except Exception as e:
-                print(f"处理图像 {image_id} 时出错: {e}")
+                print(f"Error processing image {image_id}: {e}")
                 continue
     
     # 计算平均指标
@@ -199,7 +215,7 @@ def evaluate(args):
     mean_iou = np.mean(ious)
     
     # 打印结果
-    print(f"评估结果 (split={args.split}, crf={args.crf}):")
+    print(f"Evaluation results (split={args.split}, crf={args.crf}):")
     print(f"Mean Precision: {mean_precision:.4f}")
     print(f"Mean Recall: {mean_recall:.4f}")
     print(f"Mean F1 Score: {mean_f1:.4f}")
@@ -225,8 +241,8 @@ def evaluate(args):
     
     plt.bar(metrics, values, color=['blue', 'green', 'red', 'purple'])
     plt.ylim(0, 1.0)
-    plt.title('评估指标')
-    plt.ylabel('分数')
+    plt.title('Evaluation Metrics')
+    plt.ylabel('Score')
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     
     # 添加数值标签
