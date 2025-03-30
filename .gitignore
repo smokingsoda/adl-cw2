@@ -1,0 +1,71 @@
+# 数据目录
+/data/
+data/
+*/data/
+Task2-Weakly_Supersive_learning/data/
+
+# 模型输出和checkpoint
+/output/
+output/
+*/output/
+Task2-Weakly_Supersive_learning/output/
+*.pth
+*.pth.tar
+*.pt
+*.ckpt
+*.bin
+
+# CAM文件
+*.npy
+
+# 日志文件
+/logs/
+logs/
+*/logs/
+events.out.tfevents*
+
+# 图像和结果文件
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tif
+*.tiff
+
+# Python缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE配置
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 临时文件
+temp/
+tmp/ 
