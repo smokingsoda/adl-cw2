@@ -4,12 +4,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import cv2
 import matplotlib.pyplot as plt
 import sys
+import gc
+from torch.amp import autocast, GradScaler  # 更新导入混合精度训练所需模块
 
 # 获取项目根目录路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -55,15 +59,17 @@ def parse_args():
     parser.add_argument('--lambda_aff', type=float, default=0.1,
                         help='Affinity loss weight')
     
-    # 其他参数
+    # GPU/CUDA参数
     parser.add_argument('--gpu_id', type=int, default=0,
-                        help='GPU ID')
-    parser.add_argument('--gpu_ids', type=str, default=None,
-                        help='GPU IDs for multi-GPU training (e.g., "0,1,2")')
+                        help='GPU ID (单GPU训练)')
     parser.add_argument('--use_amp', action='store_true',
                         help='使用自动混合精度加速训练')
     parser.add_argument('--cudnn_benchmark', action='store_true',
                         help='启用cudnn.benchmark以加速训练')
+    parser.add_argument('--empty_cache', action='store_true',
+                        help='每个epoch后清空CUDA缓存')
+    parser.add_argument('--cuda_prefetch', action='store_true',
+                        help='预热CUDA缓存以提高性能')
     
     # 其他参数
     parser.add_argument('--num_workers', type=int, default=4,
@@ -75,6 +81,17 @@ def parse_args():
     
     return parser.parse_args()
 
+# CUDA缓存预热函数
+def warmup_cuda(model, batch_size, device, input_shape=(3, 512, 512)):
+    """预热CUDA缓存以提高性能"""
+    print("预热CUDA缓存...")
+    dummy_input = torch.randn(batch_size, *input_shape, device=device)
+    with torch.no_grad():
+        for _ in range(3):  # 预热3次
+            _ = model(dummy_input)
+    torch.cuda.empty_cache()
+    print("CUDA缓存预热完成")
+
 def train_stage1(args):
     """
     第一阶段训练: 分类阶段
@@ -85,11 +102,31 @@ def train_stage1(args):
     save_dir = os.path.join(args.output_dir, f'stage1_{args.backbone}')
     os.makedirs(save_dir, exist_ok=True)
     
-    # A设置TensorBoard
+    # 设置TensorBoard
     writer = SummaryWriter(log_dir=os.path.join(save_dir, 'logs'))
     
-    # 设置设备
-    device = torch.device(f'cuda:{args.gpu_id}' if torch.cuda.is_available() else 'cpu')
+    # 检查CUDA是否可用并设置设备
+    if torch.cuda.is_available():
+        print(f"CUDA可用: 使用GPU {args.gpu_id}")
+        print(f"CUDA设备: {torch.cuda.get_device_name(args.gpu_id)}")
+        print(f"CUDA版本: {torch.version.cuda}")
+        print(f"CUDA内存: {torch.cuda.get_device_properties(args.gpu_id).total_memory / 1024**3:.2f}GB")
+        print(f"Torch CUDA版本: {torch.backends.cudnn.version()}")
+        
+        # 设置CuDNN
+        if args.cudnn_benchmark:
+            torch.backends.cudnn.benchmark = True
+            print("已启用CuDNN benchmark模式")
+        
+        device = torch.device(f'cuda:{args.gpu_id}')
+    else:
+        print("CUDA不可用，使用CPU训练")
+        device = torch.device('cpu')
+    
+    # 初始化混合精度训练的scaler
+    scaler = GradScaler(enabled=args.use_amp)
+    if args.use_amp:
+        print("已启用自动混合精度(AMP)训练")
     
     # 创建模型
     model = AffinityNet(
@@ -101,6 +138,10 @@ def train_stage1(args):
     # 初始化权重
     model.apply(init_weights)
     model = model.to(device)
+    
+    # 预热CUDA缓存（如果启用）
+    if args.cuda_prefetch and torch.cuda.is_available():
+        warmup_cuda(model, args.batch_size, device)
     
     # 创建数据集和数据加载器
     train_transform = get_transforms('trainval')
@@ -162,12 +203,12 @@ def train_stage1(args):
     for epoch in range(start_epoch, args.epochs):
         # 训练一个epoch
         train_loss, train_cls_loss = train_epoch(
-            model, train_loader, optimizer, criterion, device
+            model, train_loader, optimizer, criterion, device, scaler, args.use_amp
         )
         
         # 验证
         val_loss, val_cls_loss = validate(
-            model, val_loader, criterion, device
+            model, val_loader, criterion, device, args.use_amp
         )
         
         # 更新学习率
@@ -199,12 +240,17 @@ def train_stage1(args):
             is_best,
             save_dir
         )
+        
+        # 清空CUDA缓存（如果启用）
+        if args.empty_cache and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
     
     # 生成CAM
     print('Generating CAMs...')
     os.makedirs(args.cam_dir, exist_ok=True)
-    generate_cams(model, train_loader, args.cam_dir, device)
-    generate_cams(model, val_loader, args.cam_dir, device)
+    generate_cams(model, train_loader, args.cam_dir, device, args.use_amp)
+    generate_cams(model, val_loader, args.cam_dir, device, args.use_amp)
     
     writer.close()
 
@@ -221,8 +267,28 @@ def train_stage2(args):
     # 设置TensorBoard
     writer = SummaryWriter(log_dir=os.path.join(save_dir, 'logs'))
     
-    # 设置设备
-    device = torch.device(f'cuda:{args.gpu_id}' if torch.cuda.is_available() else 'cpu')
+    # 检查CUDA是否可用并设置设备
+    if torch.cuda.is_available():
+        print(f"CUDA可用: 使用GPU {args.gpu_id}")
+        print(f"CUDA设备: {torch.cuda.get_device_name(args.gpu_id)}")
+        print(f"CUDA版本: {torch.version.cuda}")
+        print(f"CUDA内存: {torch.cuda.get_device_properties(args.gpu_id).total_memory / 1024**3:.2f}GB")
+        print(f"Torch CUDA版本: {torch.backends.cudnn.version()}")
+        
+        # 设置CuDNN
+        if args.cudnn_benchmark:
+            torch.backends.cudnn.benchmark = True
+            print("已启用CuDNN benchmark模式")
+        
+        device = torch.device(f'cuda:{args.gpu_id}')
+    else:
+        print("CUDA不可用，使用CPU训练")
+        device = torch.device('cpu')
+    
+    # 初始化混合精度训练的scaler
+    scaler = GradScaler(enabled=args.use_amp)
+    if args.use_amp:
+        print("已启用自动混合精度(AMP)训练")
     
     # 创建模型
     model = AffinityNet(
@@ -237,11 +303,15 @@ def train_stage2(args):
     # 加载第一阶段模型
     stage1_path = os.path.join(args.output_dir, f'stage1_{args.backbone}', 'model_best.pth.tar')
     if os.path.exists(stage1_path):
-        checkpoint = torch.load(stage1_path)
+        checkpoint = torch.load(stage1_path, map_location=device)
         model.load_state_dict(checkpoint['state_dict'])
         print(f'Loaded stage 1 model: {stage1_path}')
     
     model = model.to(device)
+    
+    # 预热CUDA缓存（如果启用）
+    if args.cuda_prefetch and torch.cuda.is_available():
+        warmup_cuda(model, args.batch_size, device)
     
     # 创建数据集和数据加载器
     train_transform = get_transforms('trainval')
@@ -312,12 +382,12 @@ def train_stage2(args):
     for epoch in range(start_epoch, args.epochs):
         # 训练一个epoch
         train_loss, train_cls_loss, train_aff_loss = train_epoch_aff(
-            model, train_loader, optimizer, criterion, device
+            model, train_loader, optimizer, criterion, device, scaler, args.use_amp
         )
         
         # 验证
         val_loss, val_cls_loss, val_aff_loss = validate_aff(
-            model, val_loader, criterion, device
+            model, val_loader, criterion, device, args.use_amp
         )
         
         # 更新学习率
@@ -351,10 +421,15 @@ def train_stage2(args):
             is_best,
             save_dir
         )
+        
+        # 清空CUDA缓存（如果启用）
+        if args.empty_cache and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
     
     writer.close()
 
-def train_epoch(model, data_loader, optimizer, criterion, device):
+def train_epoch(model, data_loader, optimizer, criterion, device, scaler, use_amp):
     """
     训练一个epoch（阶段1：分类）
     
@@ -364,6 +439,8 @@ def train_epoch(model, data_loader, optimizer, criterion, device):
         optimizer: 优化器
         criterion: 损失函数
         device: 设备
+        scaler: 混合精度训练的scaler
+        use_amp: 是否使用自动混合精度
     
     Returns:
         平均损失
@@ -378,7 +455,8 @@ def train_epoch(model, data_loader, optimizer, criterion, device):
         labels = batch['label'].to(device)
         
         # 前向传播
-        outputs = model(images)
+        with autocast(device_type='cuda', enabled=use_amp):
+            outputs = model(images)
         
         # 计算损失
         loss_dict = criterion(outputs, {'label': labels})
@@ -387,8 +465,9 @@ def train_epoch(model, data_loader, optimizer, criterion, device):
         
         # 反向传播
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         
         # 累计损失
         total_loss += loss.item()
@@ -400,7 +479,7 @@ def train_epoch(model, data_loader, optimizer, criterion, device):
     
     return avg_loss, avg_cls_loss
 
-def train_epoch_aff(model, data_loader, optimizer, criterion, device):
+def train_epoch_aff(model, data_loader, optimizer, criterion, device, scaler, use_amp):
     """
     训练一个epoch（阶段2：亲和力）
     
@@ -410,6 +489,8 @@ def train_epoch_aff(model, data_loader, optimizer, criterion, device):
         optimizer: 优化器
         criterion: 损失函数
         device: 设备
+        scaler: 混合精度训练的scaler
+        use_amp: 是否使用自动混合精度
     
     Returns:
         平均损失
@@ -426,7 +507,8 @@ def train_epoch_aff(model, data_loader, optimizer, criterion, device):
         affinity_mask = batch['affinity_mask'].to(device)
         
         # 前向传播
-        outputs = model(images)
+        with autocast(device_type='cuda', enabled=use_amp):
+            outputs = model(images)
         
         # 计算损失
         loss_dict = criterion(outputs, {'label': labels, 'affinity_mask': affinity_mask})
@@ -436,8 +518,9 @@ def train_epoch_aff(model, data_loader, optimizer, criterion, device):
         
         # 反向传播
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         
         # 累计损失
         total_loss += loss.item()
@@ -451,7 +534,7 @@ def train_epoch_aff(model, data_loader, optimizer, criterion, device):
     
     return avg_loss, avg_cls_loss, avg_aff_loss
 
-def validate(model, data_loader, criterion, device):
+def validate(model, data_loader, criterion, device, use_amp=False):
     """
     验证（阶段1：分类）
     
@@ -460,6 +543,7 @@ def validate(model, data_loader, criterion, device):
         data_loader: 数据加载器
         criterion: 损失函数
         device: 设备
+        use_amp: 是否使用自动混合精度
     
     Returns:
         平均损失
@@ -475,12 +559,13 @@ def validate(model, data_loader, criterion, device):
             labels = batch['label'].to(device)
             
             # 前向传播
-            outputs = model(images)
-            
-            # 计算损失
-            loss_dict = criterion(outputs, {'label': labels})
-            loss = loss_dict['loss']
-            cls_loss = loss_dict['cls_loss']
+            with autocast(device_type='cuda', enabled=use_amp):
+                outputs = model(images)
+                
+                # 计算损失
+                loss_dict = criterion(outputs, {'label': labels})
+                loss = loss_dict['loss']
+                cls_loss = loss_dict['cls_loss']
             
             # 累计损失
             total_loss += loss.item()
@@ -492,7 +577,7 @@ def validate(model, data_loader, criterion, device):
     
     return avg_loss, avg_cls_loss
 
-def validate_aff(model, data_loader, criterion, device):
+def validate_aff(model, data_loader, criterion, device, use_amp=False):
     """
     验证（阶段2：亲和力）
     
@@ -501,6 +586,7 @@ def validate_aff(model, data_loader, criterion, device):
         data_loader: 数据加载器
         criterion: 损失函数
         device: 设备
+        use_amp: 是否使用自动混合精度
     
     Returns:
         平均损失
@@ -518,13 +604,14 @@ def validate_aff(model, data_loader, criterion, device):
             affinity_mask = batch['affinity_mask'].to(device)
             
             # 前向传播
-            outputs = model(images)
-            
-            # 计算损失
-            loss_dict = criterion(outputs, {'label': labels, 'affinity_mask': affinity_mask})
-            loss = loss_dict['loss']
-            cls_loss = loss_dict['cls_loss']
-            aff_loss = loss_dict['aff_loss']
+            with autocast(device_type='cuda', enabled=use_amp):
+                outputs = model(images)
+                
+                # 计算损失
+                loss_dict = criterion(outputs, {'label': labels, 'affinity_mask': affinity_mask})
+                loss = loss_dict['loss']
+                cls_loss = loss_dict['cls_loss']
+                aff_loss = loss_dict['aff_loss']
             
             # 累计损失
             total_loss += loss.item()
@@ -538,7 +625,7 @@ def validate_aff(model, data_loader, criterion, device):
     
     return avg_loss, avg_cls_loss, avg_aff_loss
 
-def generate_cams(model, data_loader, save_dir, device):
+def generate_cams(model, data_loader, save_dir, device, use_amp=False):
     """
     生成CAM并保存到指定目录
     
@@ -547,6 +634,7 @@ def generate_cams(model, data_loader, save_dir, device):
         data_loader: 数据加载器
         save_dir: 保存目录
         device: 设备
+        use_amp: 是否使用自动混合精度
     """
     model.eval()
     
@@ -559,7 +647,8 @@ def generate_cams(model, data_loader, save_dir, device):
             image_ids = batch['image_id']
             
             # 前向传播
-            outputs = model(images)
+            with autocast(device_type='cuda', enabled=use_amp):
+                outputs = model(images)
             
             # 获取CAM
             cams = outputs['cam'].cpu().numpy()  # [B, C, H, W]
