@@ -47,6 +47,10 @@ class ResNetBackbone(nn.Module):
     
     def _dilate_layer(self, layer, dilation):
         """增加ResNet层的膨胀率并移除下采样步长"""
+        # 更彻底地修改第一个块的步长
+        # 直接设置Bottleneck的stride属性
+        layer[0].stride = (1, 1)
+        
         # 修改第一个瓶颈块中的下采样步长
         if hasattr(layer[0], 'downsample') and layer[0].downsample is not None:
             # 获取下采样层
@@ -54,12 +58,18 @@ class ResNetBackbone(nn.Module):
             # 修改下采样层中的卷积步长
             if isinstance(downsample[0], nn.Conv2d):
                 downsample[0].stride = (1, 1)
-            
-        # 修改第一个瓶颈块的步长
+        
+        # 修改第一个瓶颈块内部卷积的步长
         if hasattr(layer[0], 'conv2'):
             layer[0].conv2.stride = (1, 1)
-        elif hasattr(layer[0], 'conv1') and layer[0].conv1.stride == (2, 2):
+        if hasattr(layer[0], 'conv1') and layer[0].conv1.stride == (2, 2):
             layer[0].conv1.stride = (1, 1)
+        
+        # 打印检查确认步长已修改
+        print(f"Modified layer stride: {layer[0].stride}")
+        if hasattr(layer[0], 'downsample') and layer[0].downsample is not None:
+            if isinstance(layer[0].downsample[0], nn.Conv2d):
+                print(f"Modified downsample stride: {layer[0].downsample[0].stride}")
         
         # 修改所有块中3x3卷积的膨胀率和填充
         for m in layer.modules():
