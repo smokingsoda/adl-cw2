@@ -58,6 +58,14 @@ def parse_args():
     # 其他参数
     parser.add_argument('--gpu_id', type=int, default=0,
                         help='GPU ID')
+    parser.add_argument('--gpu_ids', type=str, default=None,
+                        help='GPU IDs for multi-GPU training (e.g., "0,1,2")')
+    parser.add_argument('--use_amp', action='store_true',
+                        help='使用自动混合精度加速训练')
+    parser.add_argument('--cudnn_benchmark', action='store_true',
+                        help='启用cudnn.benchmark以加速训练')
+    
+    # 其他参数
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of data loading workers')
     parser.add_argument('--seed', type=int, default=42,
