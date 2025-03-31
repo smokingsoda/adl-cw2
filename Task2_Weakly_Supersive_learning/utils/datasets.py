@@ -6,6 +6,9 @@ from PIL import Image
 import torchvision.transforms as transforms
 from .transforms import get_transforms
 import json
+import cv2
+import pydensecrf.densecrf as dcrf
+from pydensecrf.utils import unary_from_softmax
 
 class PetDataset(Dataset):
     """
@@ -160,7 +163,7 @@ class AffinityPetDataset(Dataset):
     从CAM种子生成亲和力标签
     """
     
-    def __init__(self, root, cam_dir, split='trainval', transform=None, threshold=0.3):
+    def __init__(self, root, cam_dir, split='trainval', transform=None, threshold=0.3, img_size=224):
         """
         初始化亲和力数据集
         
@@ -170,12 +173,14 @@ class AffinityPetDataset(Dataset):
             split: 数据集分割
             transform: 输入图像变换
             threshold: CAM阈值
+            img_size: 图像大小
         """
         self.root = root
         self.cam_dir = cam_dir
         self.split = split
         self.transform = transform
         self.threshold = threshold
+        self.img_size = img_size
         
         # 宠物品种类别
         self.classes = [
@@ -275,142 +280,54 @@ class AffinityPetDataset(Dataset):
     
     def _generate_affinity_mask(self, image_id, image):
         """
-        生成亲和力掩码 - 使用更高效的方法实现论文中的策略
-        
-        Args:
-            image_id: 图像ID
-            image: 图像数据
-        
-        Returns:
-            亲和力掩码 [8, 56, 56]
+        生成亲和力掩码
+        使用条件随机场（CRF）生成更平滑的亲和力掩码
         """
-        import torch
-        from skimage import img_as_ubyte
+        # 读取原始图像
+        img_path = os.path.join(self.images_dir, f'{image_id}.jpg')
+        img = Image.open(img_path)
+        img_np = np.asarray(img, dtype=np.uint8)
         
-        try:
-            import pydensecrf.densecrf as dcrf
-            from pydensecrf.utils import unary_from_softmax
-            HAS_CRF = True
-        except ImportError:
-            print("CRF未安装，使用简化方法生成亲和力掩码")
-            HAS_CRF = False
+        # 确保数组是C连续的
+        img_np = np.ascontiguousarray(img_np)
         
-        # 固定输出分辨率为56x56
-        target_size = (56, 56)
+        # 读取掩码
+        mask_path = os.path.join(self.annotations_dir, 'trimaps', f'{image_id}.png')
+        mask = Image.open(mask_path)
+        mask_np = np.asarray(mask, dtype=np.int32)
+        mask_np = np.ascontiguousarray(mask_np)  # 确保掩码也是C连续的
         
-        # 加载CAM
-        cam = self._load_cam(image_id)  # [C, H, W]
-        labels = self._load_labels(image_id)  # [C]
+        # 将trimap转换为二值掩码
+        binary_mask = np.zeros_like(mask_np, dtype=np.int32)
+        binary_mask[mask_np == 1] = 1  # 前景
+        binary_mask[mask_np == 2] = 0  # 边界（视为背景）
+        binary_mask[mask_np == 3] = 0  # 背景
         
-        # 将CAM调整为目标尺寸
-        cam_resized = np.zeros((self.num_classes, *target_size), dtype=np.float32)
+        # 将图像和掩码的大小调整为模型的输入大小
+        if image.shape[-2:] != (self.img_size, self.img_size):
+            h, w = image.shape[-2:]
+            img_np = cv2.resize(img_np, (w, h))
+            binary_mask = cv2.resize(binary_mask, (w, h), interpolation=cv2.INTER_NEAREST)
         
-        # 只处理存在的类别
-        active_classes = []
-        for c in range(self.num_classes):
-            if labels[c] > 0 and c < cam.shape[0]:  # 确保CAM中有这个类别
-                active_classes.append(c)
-                # 调整CAM大小为固定尺寸
-                cls_cam = Image.fromarray(cam[c])
-                cls_cam = cls_cam.resize(target_size, Image.BILINEAR)
-                cam_resized[c] = np.array(cls_cam)
-        
-        # 如果没有活跃类别，返回全零掩码
-        if len(active_classes) == 0:
-            return np.zeros((8, *target_size), dtype=np.float32)
-        
-        # 转换为PyTorch张量，方便操作
-        cam_torch = torch.from_numpy(cam_resized).float()
-        
-        # 对CAM应用softmax得到类别概率
-        cam_exp = torch.exp(cam_torch)
-        cam_prob = cam_exp / (cam_exp.sum(dim=0, keepdim=True) + 1e-8)
-        
-        # 创建背景通道 (均值为0.5的置信度)
-        bg_channel = 0.5 * torch.ones((1, *target_size), dtype=torch.float32)
-        
-        # CRF处理（如果可用）生成置信区域
-        if HAS_CRF:
-            # 原始图像的小版本，用于CRF
-            if isinstance(image, torch.Tensor):
-                # 如果是张量，转换回numpy
-                img_np = image.permute(1, 2, 0).cpu().numpy()
-                img_np = (img_np * 255).astype(np.uint8)
-            else:
-                # 如果已经是PIL图像
-                img_np = np.array(image.resize(target_size, Image.BILINEAR))
-            
-            # 准备CRF输入
-            cam_with_bg = torch.cat([bg_channel, cam_prob], dim=0)  # [C+1, H, W]
-            
-            # 创建低alpha和高alpha的CRF
-            d_low = dcrf.DenseCRF2D(target_size[1], target_size[0], self.num_classes + 1)
-            d_high = dcrf.DenseCRF2D(target_size[1], target_size[0], self.num_classes + 1)
-            
-            # 设置一元势能
-            U = unary_from_softmax(cam_with_bg.numpy())
-            d_low.setUnaryEnergy(U)
-            d_high.setUnaryEnergy(U)
-            
-            # 设置二元势能
-            # 低alpha (4)
-            d_low.addPairwiseGaussian(sxy=3, compat=3)
-            d_low.addPairwiseBilateral(sxy=80, srgb=13, rgbim=img_np, compat=4)
-            
-            # 高alpha (32)
-            d_high.addPairwiseGaussian(sxy=3, compat=3)
-            d_high.addPairwiseBilateral(sxy=80, srgb=13, rgbim=img_np, compat=32)
-            
-            # 推理
-            Q_low = np.array(d_low.inference(10)).reshape(self.num_classes + 1, *target_size)
-            Q_high = np.array(d_high.inference(10)).reshape(self.num_classes + 1, *target_size)
-            
-            # 转换回torch
-            Q_low_torch = torch.from_numpy(Q_low).float()
-            Q_high_torch = torch.from_numpy(Q_high).float()
-            
-            # 置信区域定义
-            # 1. 低alpha CRF中某个类别的得分显著高于其他类别
-            bg_conf_thresh = 0.3
-            fg_conf_thresh = 0.5
-            
-            # 置信前景掩码 [C, H, W]
-            conf_fg_mask = torch.zeros((self.num_classes, *target_size), dtype=torch.bool)
-            # 置信背景掩码 [H, W]
-            conf_bg_mask = (Q_high_torch[0] > bg_conf_thresh)  # 高alpha背景得分高
-            
-            # 对每个前景类别
-            for i, c in enumerate(active_classes):
-                # 取低alpha CRF中类别c+1的分数(+1因为有背景通道)
-                cls_score = Q_low_torch[c+1]
-                # 该类别与其他所有类别的最高分数比较
-                other_max = torch.max(torch.cat([
-                    Q_low_torch[:c+1], Q_low_torch[c+2:]
-                ]), dim=0)[0]
-                # 置信前景：该类别得分高于阈值，且显著高于其他所有类别
-                conf_fg_mask[c] = (cls_score > fg_conf_thresh) & (cls_score > other_max + 0.3)
-        else:
-            # 如果没有CRF，使用简单阈值定义置信区域
-            conf_fg_mask = cam_prob > 0.7  # 置信前景：概率大于0.7
-            conf_bg_mask = cam_prob.max(dim=0)[0] < 0.3  # 置信背景：所有类别概率都小于0.3
-            
         # 生成亲和力掩码
-        affinity_mask = np.zeros((8, *target_size), dtype=np.float32)
+        h, w = binary_mask.shape
+        d_low = dcrf.DenseCRF2D(w, h, 2)  # 2类：前景和背景
         
-        # 将掩码转换为numpy
-        conf_fg_mask_np = conf_fg_mask.numpy()
-        conf_bg_mask_np = conf_bg_mask.numpy()
+        # 将二值掩码转换为概率
+        U_low = np.zeros((2, h * w), dtype=np.float32)  # 修改为2D数组
+        U_low[0, binary_mask.ravel() == 0] = 0.9  # 背景
+        U_low[0, binary_mask.ravel() == 1] = 0.1  # 前景
+        U_low[1, binary_mask.ravel() == 0] = 0.1  # 背景
+        U_low[1, binary_mask.ravel() == 1] = 0.9  # 前景
         
-        # 创建标记图：每个像素属于哪个类别（0=背景，1...C=前景类别）
-        # -1表示中性区域（不够置信）
-        label_map = np.full(target_size, -1, dtype=np.int32)
+        # 保证概率分布有效
+        U_low = np.ascontiguousarray(U_low)  # 确保概率数组是C连续的
         
-        # 背景区域标记为0
-        label_map[conf_bg_mask_np] = 0
+        # 设置一元势
+        d_low.setUnaryEnergy(-np.log(U_low))
         
-        # 前景区域标记为类别ID
-        for c in active_classes:
-            label_map[conf_fg_mask_np[c]] = c + 1  # +1因为0是背景
+        # 生成亲和力掩码
+        affinity_mask = np.zeros((8, *binary_mask.shape), dtype=np.float32)
         
         # 8个方向的偏移量
         offsets = [
@@ -420,30 +337,31 @@ class AffinityPetDataset(Dataset):
         ]
         
         # 使用高效的数组操作生成亲和力标签
-        h, w = target_size
-        
-        # 生成亲和力标签 - 使用矢量化操作
         for d, (dy, dx) in enumerate(offsets):
             # 创建移位后的标记图
-            shifted_map = np.full(target_size, -1, dtype=np.int32)
+            shifted_map = np.full(binary_mask.shape, -1, dtype=np.int32)
             
-            # 有效区域索引
-            y_src_start = max(0, dy)
-            y_src_end = h if dy <= 0 else h + dy
-            x_src_start = max(0, dx)
-            x_src_end = w if dx <= 0 else w + dx
-            
-            y_dst_start = max(0, -dy)
-            y_dst_end = h if dy >= 0 else h - dy
-            x_dst_start = max(0, -dx)
-            x_dst_end = w if dx >= 0 else w - dx
+            # 计算源和目标的索引范围
+            if dy >= 0:
+                y_src_start, y_src_end = 0, h - dy
+                y_dst_start, y_dst_end = dy, h
+            else:
+                y_src_start, y_src_end = -dy, h
+                y_dst_start, y_dst_end = 0, h + dy
+                
+            if dx >= 0:
+                x_src_start, x_src_end = 0, w - dx
+                x_dst_start, x_dst_end = dx, w
+            else:
+                x_src_start, x_src_end = -dx, w
+                x_dst_start, x_dst_end = 0, w + dx
             
             # 复制有效部分
-            shifted_map[y_src_start:y_src_end, x_src_start:x_src_end] = \
-                label_map[y_dst_start:y_dst_end, x_dst_start:x_dst_end]
+            shifted_map[y_dst_start:y_dst_end, x_dst_start:x_dst_end] = \
+                binary_mask[y_src_start:y_src_end, x_src_start:x_src_end]
             
             # 中性区域掩码（-1表示中性）
-            neutral_mask = (label_map == -1) | (shifted_map == -1)
+            neutral_mask = (binary_mask == -1) | (shifted_map == -1)
             
             # 在中性区域，亲和力标签设为-1（忽略）
             affinity_mask[d][neutral_mask] = -1
@@ -452,14 +370,21 @@ class AffinityPetDataset(Dataset):
             valid_mask = ~neutral_mask
             
             # 同一类别区域，亲和力为1
-            same_class = (label_map == shifted_map) & valid_mask
+            same_class = (binary_mask == shifted_map) & valid_mask
             affinity_mask[d][same_class] = 1
             
             # 不同类别区域，亲和力为0
-            diff_class = (label_map != shifted_map) & valid_mask
+            diff_class = (binary_mask != shifted_map) & valid_mask
             affinity_mask[d][diff_class] = 0
         
-        return affinity_mask
+        # 将亲和力掩码调整为模型输出大小（1/8）
+        h_out = h // 8
+        w_out = w // 8
+        affinity_mask_resized = np.zeros((8, h_out, w_out), dtype=np.float32)
+        for d in range(8):
+            affinity_mask_resized[d] = cv2.resize(affinity_mask[d], (w_out, h_out), interpolation=cv2.INTER_NEAREST)
+        
+        return affinity_mask_resized
     
     def __getitem__(self, index):
         """获取数据样本"""
