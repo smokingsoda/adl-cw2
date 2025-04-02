@@ -101,7 +101,7 @@ def train_unet(model):
             x = x.to(device)
 
             optimizer.zero_grad()
-            cam = get_cam(image_ids)
+            cam = get_cam(image_ids).to(device)
 
             if epoch == 0:
                 mask = cam
@@ -181,16 +181,16 @@ if __name__ == '__main__':
         train_unet(unet)
     else:
         unet.load_state_dict(torch.load("models/unet.pth"))
+
+    # test
     unet.eval()
     unet = unet.to(device)
 
     test_loss = 0.
     test_iou = 0.
-
-    # test
-    for x, _, trimap in test_loader:
+    for x, _, image_ids in test_loader:
         x = x.to(device)
-        trimap = trimap.to(device)
+        trimap = get_trimap(image_ids).to(device)
 
         with torch.no_grad():
             pred_mask = unet(x)
@@ -210,9 +210,9 @@ if __name__ == '__main__':
 
     # display samples
     unet.eval()
-    for i, (x, y, trimap) in enumerate(test_loader):
+    for i, (x, y, image_ids) in enumerate(test_loader):
         x = x.to(device)
-        trimap = trimap.to(device)
+        trimap = get_trimap(image_ids)
 
         x_denorm = denormalize(x[0].unsqueeze(0).to('cpu'))  # 保持batch维度处理
         image_np = x_denorm.squeeze(0).permute(1, 2, 0).numpy()  # C×H×W → H×W×C
@@ -232,7 +232,7 @@ if __name__ == '__main__':
         pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
         pil_image.show()
 
-        cam = torch.load('data/CAM/cam_0.pt')
+        cam = get_cam(image_ids)
         binary_image = (cam[0].squeeze(0) > 0.5).float() * 255
         pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
         pil_image.show()
