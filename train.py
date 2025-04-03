@@ -91,8 +91,8 @@ def train_classifier(model):
 def train_unet(model):
     print(f"start training UNet, {datetime.datetime.now()}")
 
-    epochs = 10
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-3)
+    epochs = 20
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-4, weight_decay=1e-5)
     model = model.to(device)
 
     for epoch in range(epochs):
@@ -101,15 +101,17 @@ def train_unet(model):
             x = x.to(device)
 
             optimizer.zero_grad()
-            cam = get_cam(image_ids).to(device)
+            cam = get_cam(image_ids)
 
-            if epoch == 0:
-                mask = cam
-            elif epoch < 3:
-                mask = 0.8 * cam + 0.2 * model(x).detach()
-            else:
-                alpha = min(0.3 * (epoch - 3), 0.6)
-                mask = (1 - alpha) * cam + alpha * model(x).detach()
+            # if epoch == 0:
+            #     mask = cam
+            # elif epoch < 3:
+            #     mask = 0.8 * cam + 0.2 * model(x).detach()
+            # else:
+            #     alpha = min(0.3 * (epoch - 3), 0.6)
+            #     mask = (1 - alpha) * cam + alpha * model(x).detach()
+
+            mask = cam
 
             mask = torch.clamp(mask, 0, 1)
 
@@ -119,7 +121,7 @@ def train_unet(model):
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item()
+            train_loss += loss.item() * x.shape[0]
 
         train_loss /= len(train_dataset)
 
@@ -203,24 +205,23 @@ if __name__ == '__main__':
             batch_iou = (intersection / (union + 1e-6)).mean().item()
             test_iou += batch_iou * x.shape[0]
 
-    test_loss /= len(val_dataset)
-    test_iou /= len(val_dataset)
+    test_loss /= len(test_loader)
+    test_iou /= len(test_loader)
 
     print(f"test_loss: {test_loss},test_iou:{test_iou}, {datetime.datetime.now()}")
 
     # display samples
     unet.eval()
-    for i, (x, y, image_ids) in enumerate(test_loader):
+    for i, (x, y, image_ids) in enumerate(train_loader):
         x = x.to(device)
-        trimap = get_trimap(image_ids)
 
         x_denorm = denormalize(x[0].unsqueeze(0).to('cpu'))  # 保持batch维度处理
         image_np = x_denorm.squeeze(0).permute(1, 2, 0).numpy()  # C×H×W → H×W×C
         image_uint8 = (image_np * 255).astype(np.uint8)  # 转为0-255整型
-
         pred_pil = Image.fromarray(image_uint8)
         pred_pil.show()
 
+        trimap = get_trimap(image_ids)
         binary_image = (trimap[0].squeeze(0) > 0.5).float() * 255
         pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
         pil_image.show()
@@ -233,8 +234,9 @@ if __name__ == '__main__':
         pil_image.show()
 
         cam = get_cam(image_ids)
-        binary_image = (cam[0].squeeze(0) > 0.5).float() * 255
+        binary_image = cam[0].squeeze(0) * 255
         pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
         pil_image.show()
 
-        break
+        if i > 0:
+            break

@@ -67,14 +67,9 @@ def create_cam(model, x, y, image_ids):
         align_corners=False
     )
 
-    # normalize
-    cam = (cam - cam.amin(dim=(1, 2), keepdim=True)) / (
-            cam.amax(dim=(1, 2), keepdim=True) - cam.amin(dim=(1, 2), keepdim=True) + 1e-8)
-
-    # add gaussian noise to smooth
-    cam = F.conv2d(cam,
-                   torch.ones(1, 1, 3, 3, device=device) / 9.0,
-                   padding=1)
+    for i in range(x.shape[0]):
+        single_cam = cam[i, 0].detach().cpu()  # (H,W)
+        torch.save(single_cam, f"data/CAM/{image_ids[i]}.pt")
 
     # CRF Processing (per image in batch)
     refined_cams = []
@@ -98,28 +93,24 @@ def create_cam(model, x, y, image_ids):
         d.setUnaryEnergy(U)
 
         # Pairwise potentials
-        d.addPairwiseGaussian(sxy=3, compat=3)  # Spatial
+        d.addPairwiseGaussian(sxy=5, compat=3)  # spatial
         d.addPairwiseBilateral(
-            sxy=10,  # Spatial radius
-            srgb=13,  # Color radius
+            sxy=100,  # Spatial radius
+            srgb=10,  # Color radius
             rgbim=img_np,
-            compat=10  # Weight
+            compat=20  # Weight
         )
 
         # Inference
-        Q = d.inference(5)  # 5 iterations
+        Q = d.inference(10)  # 5 iterations
         refined = np.argmax(Q, axis=0).reshape(cam_np.shape)
         final_cam = torch.from_numpy(refined).float().to(device)
-
-        # Normalization
-        final_cam = (final_cam - final_cam.min()) / (final_cam.max() - final_cam.min() + 1e-8)
 
         torch.save(final_cam, f"data/CAM/{image_ids[i]}.pt")
 
 
 def get_cam(image_ids):
-    cam = [torch.load(f"data/CAM/{image_id}.pt").reshape(1, 1, 256, 256) for image_id in image_ids]
-
+    cam = [torch.load(f"data/CAM/{image_id}.pt").reshape(1, 1, 256, 256).to(device) for image_id in image_ids]
     return torch.cat(cam, dim=0)
 
 
