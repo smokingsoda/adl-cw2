@@ -45,10 +45,10 @@ class UNet(nn.Module):
     def __init__(self):
         super().__init__()
         # Encoder
-        self.enc1 = EncoderBlock(3, 8)
-        self.enc2 = EncoderBlock(8, 16)
-        self.enc3 = EncoderBlock(16, 32)
-        self.enc4 = EncoderBlock(32, 64)
+        self.enc1 = EncoderBlock(3, 16)
+        self.enc2 = EncoderBlock(16, 32)
+        self.enc3 = EncoderBlock(32, 64)
+        self.enc4 = EncoderBlock(64, 128)
 
         # bottleneck
         self.bottleneck = nn.Sequential(
@@ -61,13 +61,13 @@ class UNet(nn.Module):
         )
 
         # Decoder
-        self.dec1 = DecoderBlock(128, 64)
-        self.dec2 = DecoderBlock(64, 32)
-        self.dec3 = DecoderBlock(32, 16)
-        self.dec4 = DecoderBlock(16, 8)
+        self.dec1 = DecoderBlock(256, 128)
+        self.dec2 = DecoderBlock(128, 64)
+        self.dec3 = DecoderBlock(64, 32)
+        self.dec4 = DecoderBlock(32, 16)
 
         # output
-        self.out = nn.Conv2d(8, 1, kernel_size=1)
+        self.out = nn.Conv2d(16, 1, kernel_size=1)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
@@ -75,13 +75,13 @@ class UNet(nn.Module):
         x, skip1 = self.enc1(x)
         x, skip2 = self.enc2(x)
         x, skip3 = self.enc3(x)
-        x, skip4 = self.enc4(x)
+        # x, skip4 = self.enc4(x)
 
         # bottleneck part
         x = self.bottleneck(x)
 
         # Decord part
-        x = self.dec1(x, skip4)
+        # x = self.dec1(x, skip4)
         x = self.dec2(x, skip3)
         x = self.dec3(x, skip2)
         x = self.dec4(x, skip1)

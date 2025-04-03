@@ -91,7 +91,7 @@ def train_classifier(model):
 def train_unet(model):
     print(f"start training UNet, {datetime.datetime.now()}")
 
-    epochs = 20
+    epochs = 10
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-4, weight_decay=1e-5)
     model = model.to(device)
 
@@ -113,7 +113,9 @@ def train_unet(model):
 
             mask = cam
 
-            mask = torch.clamp(mask, 0, 1)
+            # mask = torch.clamp(mask, 0, 1)
+
+            mask = (mask>0.5).float()
 
             pred_mask = model(x)
             loss = weighted_loss(pred_mask, mask)
@@ -121,7 +123,7 @@ def train_unet(model):
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item() * x.shape[0]
+            train_loss += loss.item()
 
         train_loss /= len(train_dataset)
 
@@ -190,6 +192,7 @@ if __name__ == '__main__':
 
     test_loss = 0.
     test_iou = 0.
+    cam_iou = 0.
     for x, _, image_ids in test_loader:
         x = x.to(device)
         trimap = get_trimap(image_ids).to(device)
@@ -205,10 +208,18 @@ if __name__ == '__main__':
             batch_iou = (intersection / (union + 1e-6)).sum().item()
             test_iou += batch_iou
 
-    test_loss /= len(test_loader)
-    test_iou /= len(test_loader)
+            cam = get_cam(image_ids)
+            cam_binary = (cam > 0.5).float()
+            cam_intersection = (cam_binary * trimap).sum((1, 2, 3))
+            cam_union = (cam_binary + trimap).clamp(0, 1).sum((1, 2, 3))
+            cam_batch_iou = (cam_intersection / (cam_union + 1e-6)).sum().item()
+            cam_iou += cam_batch_iou
 
-    print(f"test_loss: {test_loss},test_iou:{test_iou}, {datetime.datetime.now()}")
+    test_loss /= len(test_dataset)
+    test_iou /= len(test_dataset)
+    cam_iou /= len(test_dataset)
+
+    print(f"test_loss: {test_loss},test_iou:{test_iou}, {datetime.datetime.now()}, cam_iou:{cam_iou}")
 
     # display samples
     unet.eval()
@@ -239,3 +250,4 @@ if __name__ == '__main__':
         pil_image.show()
 
         break
+
