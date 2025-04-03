@@ -136,13 +136,13 @@ def train_unet(model):
             with torch.no_grad():
                 pred_mask = model(x)
                 loss = weighted_loss(pred_mask, trimap)
-                val_loss += loss.item() * x.shape[0]
+                val_loss += loss.item()
 
                 pred_binary = (pred_mask > 0.5).float()
                 intersection = (pred_binary * trimap).sum((1, 2, 3))
                 union = (pred_binary + trimap).clamp(0, 1).sum((1, 2, 3))
-                batch_iou = (intersection / (union + 1e-6)).mean().item()
-                val_iou += batch_iou * x.shape[0]
+                batch_iou = (intersection / (union + 1e-6)).sum().item()
+                val_iou += batch_iou
 
         val_loss /= len(val_dataset)
         val_iou /= len(val_dataset)
@@ -197,13 +197,13 @@ if __name__ == '__main__':
         with torch.no_grad():
             pred_mask = unet(x)
             loss = weighted_loss(pred_mask, trimap)
-            test_loss += loss.item() * x.shape[0]
+            test_loss += loss.item()
 
             pred_binary = (pred_mask > 0.5).float()
             intersection = (pred_binary * trimap).sum((1, 2, 3))
             union = (pred_binary + trimap).clamp(0, 1).sum((1, 2, 3))
-            batch_iou = (intersection / (union + 1e-6)).mean().item()
-            test_iou += batch_iou * x.shape[0]
+            batch_iou = (intersection / (union + 1e-6)).sum().item()
+            test_iou += batch_iou
 
     test_loss /= len(test_loader)
     test_iou /= len(test_loader)
@@ -212,7 +212,7 @@ if __name__ == '__main__':
 
     # display samples
     unet.eval()
-    for i, (x, y, image_ids) in enumerate(train_loader):
+    for i, (x, y, image_ids) in enumerate(test_loader):
         x = x.to(device)
 
         x_denorm = denormalize(x[0].unsqueeze(0).to('cpu'))  # 保持batch维度处理
@@ -238,5 +238,4 @@ if __name__ == '__main__':
         pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
         pil_image.show()
 
-        if i > 0:
-            break
+        break
