@@ -249,5 +249,6 @@ if __name__ == '__main__':
         pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
         pil_image.show()
 
-        break
+        if i>2:
+            break
 
