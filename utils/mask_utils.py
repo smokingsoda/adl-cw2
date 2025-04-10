@@ -4,11 +4,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
-from pydensecrf import densecrf
-from pydensecrf.utils import unary_from_softmax
 from torchvision import transforms
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 # save grad_cam in local as .pt file
@@ -53,64 +51,34 @@ def create_cam(model, x, y, image_ids):
     pooled_gradients = torch.mean(gradients, dim=[2, 3])  # shape = (B,C)
 
     # weighted sum of channels
-    cam = torch.einsum('bc,bchw->bhw', pooled_gradients, features)
+    cam = torch.einsum("bc,bchw->bhw", pooled_gradients, features)
 
     # block negative values
     cam = F.relu(cam)
 
     # Normalization
-    cam = (cam - cam.amin(dim=(1, 2), keepdim=True)[0]) / (cam.amax(dim=(1, 2), keepdim=True)[0] + 1e-8)
+    cam = (cam - cam.amin(dim=(1, 2), keepdim=True)[0]) / (
+        cam.amax(dim=(1, 2), keepdim=True)[0] + 1e-8
+    )
     cam = F.interpolate(
         cam.unsqueeze(1),
         size=(x.shape[2], x.shape[3]),
-        mode='bilinear',
-        align_corners=False
+        mode="bilinear",
+        align_corners=False,
     )
 
     for i in range(x.shape[0]):
         single_cam = cam[i, 0].detach().cpu()  # (H,W)
         torch.save(single_cam, f"data/CAM/{image_ids[i]}.pt")
 
-    # CRF Processing (per image in batch)
-    refined_cams = []
-    for i in range(x.shape[0]):
-        img_np = x[i].mul(255).byte().cpu().numpy().transpose(1, 2, 0)  # (H,W,3)
-        cam_np = cam[i, 0].detach().cpu().numpy()  # (H,W)
-
-        img_np = np.ascontiguousarray(img_np)
-        cam_np = np.ascontiguousarray(cam_np)
-
-        # Skip CRF if image is invalid
-        if np.max(cam_np) < 0.1:
-            refined_cams.append(cam[i])
-            continue
-
-        # CRF Parameters
-        d = densecrf.DenseCRF2D(img_np.shape[1], img_np.shape[0], 2)  # 2 classes
-
-        # Unary potential (negative log probability)
-        U = unary_from_softmax(np.stack([1 - cam_np, cam_np], axis=0))
-        d.setUnaryEnergy(U)
-
-        # Pairwise potentials
-        d.addPairwiseGaussian(sxy=5, compat=3)  # spatial
-        d.addPairwiseBilateral(
-            sxy=100,  # Spatial radius
-            srgb=10,  # Color radius
-            rgbim=img_np,
-            compat=20  # Weight
-        )
-
-        # Inference
-        Q = d.inference(10)  # 5 iterations
-        refined = np.argmax(Q, axis=0).reshape(cam_np.shape)
-        final_cam = torch.from_numpy(refined).float().to(device)
-
-        torch.save(final_cam, f"data/CAM/{image_ids[i]}.pt")
-
 
 def get_cam(image_ids):
-    cam = [torch.load(f"data/CAM/{image_id}.pt").reshape(1, 1, 256, 256).to(device) for image_id in image_ids]
+    cam = [
+        torch.load(f"data/CAM/{image_id}.pt", map_location=device, weights_only=False)
+        .reshape(1, 1, 256, 256)
+        .to(device)
+        for image_id in image_ids
+    ]
     return torch.cat(cam, dim=0)
 
 
