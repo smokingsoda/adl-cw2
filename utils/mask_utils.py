@@ -93,12 +93,12 @@ def create_cam(model, x, y, image_ids):
         d.setUnaryEnergy(U)
 
         # Pairwise potentials
-        d.addPairwiseGaussian(sxy=5, compat=3)  # spatial
+        d.addPairwiseGaussian(sxy=3, compat=10)  # spatial
         d.addPairwiseBilateral(
-            sxy=100,  # Spatial radius
+            sxy=20,  # Spatial radius
             srgb=10,  # Color radius
             rgbim=img_np,
-            compat=20  # Weight
+            compat=3  # Weight
         )
 
         # Inference
