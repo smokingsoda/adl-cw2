@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import DataLoader, random_split
+from tqdm import tqdm
 
 from data.dataset import OxfordIIITPet
 from eval import eval_classifier
@@ -38,6 +39,7 @@ unet = UNet()
 
 
 def train_classifier(model):
+    tqdm.write(f"Start training Classifier...")
     epochs = 10
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
     loss_function = torch.nn.CrossEntropyLoss()
@@ -49,7 +51,8 @@ def train_classifier(model):
 
         train_correct = 0.
         train_loss = 0.
-        for x, y, _ in train_loader:
+        train_bar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs} [Train]")
+        for x, y, _ in train_bar:
             x = x.to(device)
             y = y.to(device)
 
@@ -62,6 +65,7 @@ def train_classifier(model):
             _, predicted = torch.max(y_pred, 1)
             train_correct += (predicted == y).sum().item()
             train_loss += loss.item() * x.shape[0]
+            train_bar.set_postfix({"loss": loss.item()})
 
         train_acc = train_correct / len(train_dataset)
         train_loss /= len(train_dataset)
@@ -70,75 +74,77 @@ def train_classifier(model):
         model.eval()
         val_correct = 0.
         val_loss = 0.
-        for x, y, _ in val_loader:
+        val_bar = tqdm(val_loader, desc=f"Epoch {epoch + 1}/{epochs} [Val]")
+        for x, y, _ in val_bar:
             x = x.to(device)
             y = y.to(device)
 
             val_batch_correct, val_batch_loss = eval_classifier(model, x, y)
             val_correct += val_batch_correct
             val_loss += val_batch_loss * x.shape[0]
+            val_bar.set_postfix({"loss": val_batch_loss})
 
         val_acc = val_correct / len(val_dataset)
         val_loss /= len(val_dataset)
 
-        # if epoch % 10 == 0:
-        print(f"EPOCH: {epoch + 1}/{epochs}, train_loss: {train_loss}, train_acc: {train_acc * 100:.2f}% "
-              f"val_loss: {val_loss}, val_acc: {val_acc * 100:.2f}%, {datetime.datetime.now()}")
+        train_bar.clear()
+        val_bar.clear()
+        tqdm.write(f"EPOCH: {epoch + 1}/{epochs}, train_loss: {train_loss}, train_acc: {train_acc * 100:.2f}% "
+                   f"val_loss: {val_loss}, val_acc: {val_acc * 100:.2f}%")
 
     torch.save(model.state_dict(), "models/resnet18.pth")
 
 
 def train_unet(model):
-    print(f"start training UNet, {datetime.datetime.now()}")
+    tqdm.write(f"Start training UNet...")
 
     epochs = 10
-    optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-4, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-5, weight_decay=1e-6)
     model = model.to(device)
 
     for epoch in range(epochs):
         train_loss = 0.
-        for i, (x, _, image_ids) in enumerate(train_loader):
+        train_bar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs} [Train]")
+        for x, _, image_ids in train_bar:
             x = x.to(device)
 
             optimizer.zero_grad()
             cam = get_cam(image_ids)
+
+            mask = cam
 
             # if epoch == 0:
             #     mask = cam
             # elif epoch < 3:
             #     mask = 0.8 * cam + 0.2 * model(x).detach()
             # else:
-            #     alpha = min(0.3 * (epoch - 3), 0.6)
+            #     alpha = 0.2 + 0.02 * epoch
             #     mask = (1 - alpha) * cam + alpha * model(x).detach()
-
-            mask = cam
-
             # mask = torch.clamp(mask, 0, 1)
 
-            mask = (mask>0.5).float()
 
             pred_mask = model(x)
             loss = weighted_loss(pred_mask, mask)
 
             loss.backward()
             optimizer.step()
-
-            train_loss += loss.item()
-
+            train_loss += loss.item() * x.shape[0]
+            train_bar.set_postfix({"loss": loss.item()})
         train_loss /= len(train_dataset)
 
         # evaluation
         model.eval()
         val_loss = 0.
         val_iou = 0.
-        for x, _, image_ids in val_loader:
+        val_bar = tqdm(val_loader, desc=f"Epoch {epoch + 1}/{epochs} [Val]")
+        for x, _, image_ids in val_bar:
             x = x.to(device)
             trimap = get_trimap(image_ids).to(device)
 
             with torch.no_grad():
                 pred_mask = model(x)
                 loss = weighted_loss(pred_mask, trimap)
-                val_loss += loss.item()
+                val_loss += loss.item() * x.shape[0]
 
                 pred_binary = (pred_mask > 0.5).float()
                 intersection = (pred_binary * trimap).sum((1, 2, 3))
@@ -146,11 +152,14 @@ def train_unet(model):
                 batch_iou = (intersection / (union + 1e-6)).sum().item()
                 val_iou += batch_iou
 
+                val_bar.set_postfix({"loss": loss.item()})
+
         val_loss /= len(val_dataset)
         val_iou /= len(val_dataset)
 
-        print(f"EPOCH: {epoch + 1}/{epochs}, train_loss: {train_loss}, val_loss: {val_loss}, "
-              f"val_iou:{val_iou}, {datetime.datetime.now()}")
+        train_bar.clear()
+        val_bar.clear()
+        tqdm.write(f"EPOCH: {epoch + 1}/{epochs}, train_loss: {train_loss}, val_loss: {val_loss}, val_iou:{val_iou}")
 
     torch.save(model.state_dict(), "models/unet.pth")
 
@@ -174,6 +183,7 @@ if __name__ == '__main__':
 
     if not os.path.exists("data/CAM"):
         for loader in [train_loader, val_loader, test_loader]:
+            # for loader in [test_loader]:
             for i, (x, y, ids) in enumerate(loader):
                 create_cam(resnet, x, y, ids)
 
@@ -224,31 +234,30 @@ if __name__ == '__main__':
     # display samples
     unet.eval()
     for i, (x, y, image_ids) in enumerate(test_loader):
-        x = x.to(device)
-
-        x_denorm = denormalize(x[0].unsqueeze(0).to('cpu'))  # 保持batch维度处理
-        image_np = x_denorm.squeeze(0).permute(1, 2, 0).numpy()  # C×H×W → H×W×C
-        image_uint8 = (image_np * 255).astype(np.uint8)  # 转为0-255整型
-        pred_pil = Image.fromarray(image_uint8)
-        pred_pil.show()
-
-        trimap = get_trimap(image_ids)
-        binary_image = (trimap[0].squeeze(0) > 0.5).float() * 255
-        pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
-        pil_image.show()
-
-        with torch.no_grad():
-            pred_mask = unet(x)
-
-        binary_image = (pred_mask[0].squeeze(0) > 0.5).float() * 255
-        pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
-        pil_image.show()
-
-        cam = get_cam(image_ids)
-        binary_image = cam[0].squeeze(0) * 255
-        pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
-        pil_image.show()
-
-        if i>2:
+        if i > 0:
             break
+        if i == 0:
+            x = x.to(device)
 
+            x_denorm = denormalize(x[0].unsqueeze(0).to('cpu'))  # 保持batch维度处理
+            image_np = x_denorm.squeeze(0).permute(1, 2, 0).numpy()  # C×H×W → H×W×C
+            image_uint8 = (image_np * 255).astype(np.uint8)  # 转为0-255整型
+            pred_pil = Image.fromarray(image_uint8)
+            pred_pil.show()
+
+            trimap = get_trimap(image_ids)
+            binary_image = (trimap[0].squeeze(0) > 0.5).float() * 255
+            pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
+            pil_image.show()
+
+            with torch.no_grad():
+                pred_mask = unet(x)
+
+            binary_image = (pred_mask[0].squeeze(0) > 0.5).float() * 255
+            pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
+            pil_image.show()
+
+            cam = get_cam(image_ids)
+            binary_image = cam[0].squeeze(0) * 255
+            pil_image = Image.fromarray(binary_image.to('cpu').numpy().astype(np.uint8), mode='L')
+            pil_image.show()
