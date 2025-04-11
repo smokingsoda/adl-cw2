@@ -210,7 +210,7 @@ if __name__ == '__main__':
         with torch.no_grad():
             pred_mask = unet(x)
             loss = weighted_loss(pred_mask, trimap)
-            test_loss += loss.item()
+            test_loss += loss.item()*x.shape[0]
 
             pred_binary = (pred_mask > 0.5).float()
             intersection = (pred_binary * trimap).sum((1, 2, 3))
@@ -229,7 +229,7 @@ if __name__ == '__main__':
     test_iou /= len(test_dataset)
     cam_iou /= len(test_dataset)
 
-    print(f"test_loss: {test_loss},test_iou:{test_iou}, {datetime.datetime.now()}, cam_iou:{cam_iou}")
+    print(f"test_loss: {test_loss},test_iou:{test_iou}, cam_iou:{cam_iou}")
 
     # display samples
     unet.eval()
